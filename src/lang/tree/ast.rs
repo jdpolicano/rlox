@@ -184,6 +184,41 @@ impl fmt::Display for Literal {
 }
 
 #[derive(Debug)]
+pub struct Identifier {
+    name: String,
+    view: View,
+}
+
+impl Identifier {
+    pub fn name_str(&self) -> &str {
+        self.name.as_str()
+    }
+
+    pub fn view(&self) -> View {
+        self.view
+    }
+}
+
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "'{}'", self.name)
+    }
+}
+
+impl TryFrom<Token<'_>> for Identifier {
+    type Error = ConversionError;
+    fn try_from(value: Token<'_>) -> Result<Self, Self::Error> {
+        match value.token_type {
+            TokenType::Identifier => Ok(Self {
+                name: value.lexeme.to_string(),
+                view: value.pos,
+            }),
+            _ => Err(ConversionError::InvalidIdentifier(value.into())),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum Expr {
     Binary {
         left: Box<Expr>,
@@ -203,6 +238,10 @@ pub enum Expr {
         prefix: UnaryPrefix,
         value: Box<Expr>,
     },
+
+    Variable {
+        value: Identifier,
+    },
 }
 
 impl Expr {
@@ -212,6 +251,31 @@ impl Expr {
             Expr::Grouping { expr } => v.visit_grouping(expr),
             Expr::Literal { value } => v.visit_literal(value),
             Expr::Unary { prefix, value } => v.visit_unary(*prefix, value),
+            Expr::Variable { value } => v.visit_variable(value),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Stmt {
+    Expression {
+        expr: Expr,
+    },
+    Print {
+        expr: Expr,
+    },
+    Var {
+        name: Identifier,
+        initializer: Option<Expr>,
+    },
+}
+
+impl Stmt {
+    pub fn accept<T>(&self, v: &mut dyn Visitor<T>) -> T {
+        match self {
+            Stmt::Expression { expr } => v.visit_expression_statement(expr),
+            Stmt::Print { expr } => v.visit_print_statement(expr),
+            Self::Var { name, initializer } => v.visit_var_statement(name, initializer.as_ref()),
         }
     }
 }

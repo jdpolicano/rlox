@@ -1,4 +1,4 @@
-use crate::lang::tree::ast::{BinaryOperator, Expr, Literal, UnaryPrefix};
+use crate::lang::tree::ast::{BinaryOperator, Expr, Identifier, Literal, UnaryPrefix};
 use crate::lang::visitor::Visitor;
 
 pub struct PrintVisitor;
@@ -28,4 +28,9 @@ impl Visitor<()> for PrintVisitor {
         print!("{}", prefix);
         value.accept(self);
     }
+    // todo: if needed go do these one day
+    fn visit_expression_statement(&mut self, _: &Expr) -> () {}
+    fn visit_print_statement(&mut self, _: &Expr) -> () {}
+    fn visit_var_statement(&mut self, _: &Identifier, _: Option<&Expr>) -> () {}
+    fn visit_variable(&mut self, _: &Identifier) -> () {}
 }

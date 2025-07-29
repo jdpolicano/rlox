@@ -3,145 +3,145 @@ use std::fmt;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum LoxPrimitive {
+pub enum Value {
     Number(f64),
     String(Rc<String>),
     Boolean(bool),
     Nil,
 }
 
-impl From<ast::Literal> for LoxPrimitive {
+impl From<ast::Literal> for Value {
     fn from(value: ast::Literal) -> Self {
         match value {
-            ast::Literal::Boolean { value, view: _ } => LoxPrimitive::Boolean(value),
-            ast::Literal::String { value, view: _ } => LoxPrimitive::String(value),
-            ast::Literal::Number { value, view: _ } => LoxPrimitive::Number(value),
-            ast::Literal::Nil { view: _ } => LoxPrimitive::Nil,
+            ast::Literal::Boolean { value, view: _ } => Value::Boolean(value),
+            ast::Literal::String { value, view: _ } => Value::String(value),
+            ast::Literal::Number { value, view: _ } => Value::Number(value),
+            ast::Literal::Nil { view: _ } => Value::Nil,
         }
     }
 }
 
-impl From<&ast::Literal> for LoxPrimitive {
+impl From<&ast::Literal> for Value {
     fn from(value: &ast::Literal) -> Self {
         match value {
-            ast::Literal::Boolean { value, view: _ } => LoxPrimitive::Boolean(*value),
-            ast::Literal::String { value, view: _ } => LoxPrimitive::String(value.clone()),
-            ast::Literal::Number { value, view: _ } => LoxPrimitive::Number(*value),
-            ast::Literal::Nil { view: _ } => LoxPrimitive::Nil,
+            ast::Literal::Boolean { value, view: _ } => Value::Boolean(*value),
+            ast::Literal::String { value, view: _ } => Value::String(value.clone()),
+            ast::Literal::Number { value, view: _ } => Value::Number(*value),
+            ast::Literal::Nil { view: _ } => Value::Nil,
         }
     }
 }
 
-impl From<f64> for LoxPrimitive {
+impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Self::Number(value)
     }
 }
 
-impl From<bool> for LoxPrimitive {
+impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Self::Boolean(value)
     }
 }
 
-impl From<&str> for LoxPrimitive {
+impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Self::String(Rc::new(value.to_string()))
     }
 }
 
-impl From<String> for LoxPrimitive {
+impl From<String> for Value {
     fn from(value: String) -> Self {
         Self::String(Rc::new(value))
     }
 }
 
-impl fmt::Display for LoxPrimitive {
+impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LoxPrimitive::Number(n) => write!(f, "{}", n),
-            LoxPrimitive::String(s) => write!(f, "{}", s),
-            LoxPrimitive::Boolean(b) => write!(f, "{}", b),
-            LoxPrimitive::Nil => write!(f, "nil"),
+            Value::Number(n) => write!(f, "{}", n),
+            Value::String(s) => write!(f, "{}", s),
+            Value::Boolean(b) => write!(f, "{}", b),
+            Value::Nil => write!(f, "nil"),
         }
     }
 }
 
-impl LoxPrimitive {
+impl Value {
     pub fn truthy(&self) -> bool {
         match self {
-            LoxPrimitive::Boolean(b) => *b,
-            LoxPrimitive::Nil => false,
+            Value::Boolean(b) => *b,
+            Value::Nil => false,
             _ => true,
         }
     }
 
     pub fn type_str(&self) -> &'static str {
         match self {
-            LoxPrimitive::Boolean(_) => "boolean",
-            LoxPrimitive::Number(_) => "number",
-            LoxPrimitive::String(_) => "string",
-            LoxPrimitive::Nil => "nil",
+            Value::Boolean(_) => "boolean",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Nil => "nil",
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum LoxValue {
-    Primitive(LoxPrimitive),
+pub enum LoxObject {
+    Value(Value),
 }
 
-impl From<ast::Literal> for LoxValue {
+impl From<ast::Literal> for LoxObject {
     fn from(value: ast::Literal) -> Self {
-        Self::Primitive(value.into())
+        Self::Value(value.into())
     }
 }
 
-impl From<&ast::Literal> for LoxValue {
+impl From<&ast::Literal> for LoxObject {
     fn from(value: &ast::Literal) -> Self {
-        Self::Primitive(value.into())
+        Self::Value(value.into())
     }
 }
 
-impl From<f64> for LoxValue {
+impl From<f64> for LoxObject {
     fn from(value: f64) -> Self {
-        Self::Primitive(value.into())
+        Self::Value(value.into())
     }
 }
 
-impl From<bool> for LoxValue {
+impl From<bool> for LoxObject {
     fn from(value: bool) -> Self {
-        Self::Primitive(value.into())
+        Self::Value(value.into())
     }
 }
 
-impl From<&str> for LoxValue {
+impl From<&str> for LoxObject {
     fn from(value: &str) -> Self {
-        Self::Primitive(value.into())
+        Self::Value(value.into())
     }
 }
 
-impl From<(&str, &str)> for LoxValue {
+impl From<(&str, &str)> for LoxObject {
     fn from(value: (&str, &str)) -> Self {
         let mut container = String::with_capacity(value.0.len() + value.1.len());
         container.push_str(value.0);
         container.push_str(value.1);
-        Self::Primitive(container.into())
+        Self::Value(container.into())
     }
 }
 
-impl fmt::Display for LoxValue {
+impl fmt::Display for LoxObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LoxValue::Primitive(prim) => write!(f, "{}", prim),
+            LoxObject::Value(prim) => write!(f, "{}", prim),
         }
     }
 }
 
-impl PartialEq for LoxValue {
-    fn eq(&self, other: &LoxValue) -> bool {
+impl PartialEq for LoxObject {
+    fn eq(&self, other: &LoxObject) -> bool {
         match (self, other) {
-            (LoxValue::Primitive(a), LoxValue::Primitive(b)) => a.eq(b),
+            (LoxObject::Value(a), LoxObject::Value(b)) => a.eq(b),
             _ => false,
         }
     }
@@ -151,37 +151,41 @@ impl PartialEq for LoxValue {
     }
 }
 
-impl LoxValue {
+impl LoxObject {
+    pub fn new_nil() -> Self {
+        Self::Value(Value::Nil)
+    }
+
     pub fn is_number(&self) -> bool {
         match self {
-            LoxValue::Primitive(LoxPrimitive::Number(_)) => true,
+            LoxObject::Value(Value::Number(_)) => true,
             _ => false,
         }
     }
 
     pub fn is_string(&self) -> bool {
         match self {
-            LoxValue::Primitive(LoxPrimitive::String(_)) => true,
+            LoxObject::Value(Value::String(_)) => true,
             _ => false,
         }
     }
 
     pub fn is_boolean(&self) -> bool {
         match self {
-            LoxValue::Primitive(LoxPrimitive::Boolean(_)) => true,
+            LoxObject::Value(Value::Boolean(_)) => true,
             _ => false,
         }
     }
 
     pub fn is_nil(&self) -> bool {
         match self {
-            LoxValue::Primitive(LoxPrimitive::Nil) => true,
+            LoxObject::Value(Value::Nil) => true,
             _ => false,
         }
     }
 
     pub fn as_number(&self) -> Option<f64> {
-        if let LoxValue::Primitive(LoxPrimitive::Number(n)) = self {
+        if let LoxObject::Value(Value::Number(n)) = self {
             Some(*n)
         } else {
             None
@@ -189,7 +193,7 @@ impl LoxValue {
     }
 
     pub fn as_string(&self) -> Option<&String> {
-        if let LoxValue::Primitive(LoxPrimitive::String(s)) = self {
+        if let LoxObject::Value(Value::String(s)) = self {
             Some(s)
         } else {
             None
@@ -197,7 +201,7 @@ impl LoxValue {
     }
 
     pub fn as_boolean(&self) -> Option<bool> {
-        if let LoxValue::Primitive(LoxPrimitive::Boolean(b)) = self {
+        if let LoxObject::Value(Value::Boolean(b)) = self {
             Some(*b)
         } else {
             None
@@ -205,7 +209,7 @@ impl LoxValue {
     }
 
     pub fn as_nil(&self) -> Option<()> {
-        if let LoxValue::Primitive(LoxPrimitive::Nil) = self {
+        if let LoxObject::Value(Value::Nil) = self {
             Some(())
         } else {
             None
@@ -214,13 +218,13 @@ impl LoxValue {
 
     pub fn truthy(&self) -> bool {
         match self {
-            LoxValue::Primitive(prim) => prim.truthy(),
+            LoxObject::Value(prim) => prim.truthy(),
         }
     }
 
     pub fn type_str(&self) -> &'static str {
         match self {
-            LoxValue::Primitive(p) => p.type_str(),
+            LoxObject::Value(p) => p.type_str(),
         }
     }
 }

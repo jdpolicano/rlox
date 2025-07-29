@@ -12,6 +12,8 @@ pub enum BinaryError {
 
 #[derive(Error, Debug, Clone)]
 pub enum LoxError {
-    #[error("{msg} {view}")]
+    #[error("TypeError: {msg} {view}")]
     TypeError { msg: String, view: View },
+    #[error("ReferenceError: {name} is undefined {view}")]
+    ReferenceError { name: String, view: View },
 }

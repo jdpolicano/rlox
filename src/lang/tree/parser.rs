@@ -2,9 +2,8 @@ use super::ast::Expr;
 use super::error::ParseError;
 use crate::lang::tokenizer::scanner::Scanner;
 use crate::lang::tokenizer::token::{Token, TokenType};
+use crate::lang::tree::ast::Stmt;
 use std::iter::{Iterator, Peekable};
-
-type ParseResult = Result<Expr, ParseError>;
 
 struct TokenStream<'a> {
     tokens: Peekable<Scanner<'a>>,
@@ -46,20 +45,91 @@ impl<'a> TokenStream<'a> {
 
 pub struct Parser<'a> {
     tokens: TokenStream<'a>,
+    statements: Vec<Stmt>,
+    errors: Vec<ParseError>,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(src: &'a str) -> Self {
         Self {
             tokens: TokenStream::new(src),
+            statements: Vec::with_capacity(1024),
+            errors: Vec::with_capacity(1024),
         }
     }
 
-    pub fn parse(&mut self) -> ParseResult {
-        self.expression()
+    pub fn parse(&mut self) {
+        while !self.is_done() {
+            match self.declaration() {
+                Ok(stmt) => self.statements.push(stmt),
+                Err(e) => {
+                    println!("{}", e);
+                    self.errors.push(e);
+                    self.recover();
+                }
+            }
+        }
     }
 
-    fn expression(&mut self) -> ParseResult {
+    pub fn had_errors(&self) -> bool {
+        self.errors.len() > 0
+    }
+
+    pub fn take_statements(self) -> Vec<Stmt> {
+        self.statements
+    }
+
+    fn declaration(&mut self) -> Result<Stmt, ParseError> {
+        if let Some(_) = self.match_one(TokenType::Var) {
+            self.var_declaration()
+        } else {
+            self.statement()
+        }
+    }
+
+    fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
+        let name = self.expect(
+            "var delcaration requires an identifier",
+            TokenType::Identifier,
+        )?;
+
+        let initializer = if let Some(_) = self.match_one(TokenType::Equal) {
+            Some(self.expression()?)
+        } else {
+            None
+        };
+
+        self.expect("unterminated var statment", TokenType::Semicolon)?;
+
+        Ok(Stmt::Var {
+            name: name.try_into()?,
+            initializer,
+        })
+    }
+
+    fn statement(&mut self) -> Result<Stmt, ParseError> {
+        let s = if let Some(_) = self.match_one(TokenType::Print) {
+            self.print_statement()
+        } else {
+            self.expression_statement()
+        };
+        self.expect("unterminated statment", TokenType::Semicolon)?;
+        s
+    }
+
+    fn print_statement(&mut self) -> Result<Stmt, ParseError> {
+        Ok(Stmt::Print {
+            expr: self.expression()?,
+        })
+    }
+
+    fn expression_statement(&mut self) -> Result<Stmt, ParseError> {
+        Ok(Stmt::Expression {
+            expr: self.expression()?,
+        })
+    }
+
+    fn expression(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.comparison()?;
 
         while let Some(op) = self.match_equality() {
@@ -74,7 +144,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn comparison(&mut self) -> ParseResult {
+    fn comparison(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.term()?;
 
         while let Some(op) = self.match_comparison() {
@@ -89,7 +159,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn term(&mut self) -> ParseResult {
+    fn term(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.factor()?;
 
         while let Some(op) = self.match_term() {
@@ -104,7 +174,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn factor(&mut self) -> ParseResult {
+    fn factor(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.unary()?;
         while let Some(op) = self.match_factor() {
             let right = self.unary()?;
@@ -118,7 +188,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn unary(&mut self) -> ParseResult {
+    fn unary(&mut self) -> Result<Expr, ParseError> {
         if let Some(op) = self.match_unary() {
             Ok(Expr::Unary {
                 prefix: op.try_into()?,
@@ -129,7 +199,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn primary(&mut self) -> ParseResult {
+    fn primary(&mut self) -> Result<Expr, ParseError> {
         if let Some(_) = self.match_one(TokenType::LeftParen) {
             let expr = self.expression()?;
             let _ = self.expect(
@@ -140,6 +210,13 @@ impl<'a> Parser<'a> {
                 expr: Box::new(expr),
             });
         }
+
+        if let Some(name) = self.match_one(TokenType::Identifier) {
+            return Ok(Expr::Variable {
+                value: name.try_into()?,
+            });
+        }
+
         let next_tok = self.tokens.next()?;
         let value = next_tok.try_into()?;
         Ok(Expr::Literal { value })
@@ -197,12 +274,24 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn is_done(&mut self) -> bool {
+        if let Some(result) = self.tokens.peek() {
+            match result {
+                Ok(t) if t.token_type == TokenType::Eof => return true,
+                _ => return false,
+            }
+        }
+        true
+    }
+
     /// recover from a panic state by reading through until we hit the end of the stream, or alternatively a semi-colon terminator.
     fn recover(&mut self) {
         while let Some(result) = self.tokens.peek() {
             match result {
-                Ok(toke) if toke.token_type == TokenType::Semicolon => break,
-                Ok(toke) if toke.token_type == TokenType::Eof => break,
+                Ok(toke) if toke.token_type == TokenType::Semicolon => {
+                    let _ = self.tokens.next();
+                    break;
+                }
                 _ => {
                     let _ = self.tokens.next();
                 }

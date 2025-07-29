@@ -12,21 +12,23 @@ pub enum ConversionError {
     InvalidLiteralType(OwnedToken),
     #[error("Failed to convert src string to a number {0}")]
     InvalidNumber(OwnedToken),
+    #[error("Invalid token for identifier {0}")]
+    InvalidIdentifier(OwnedToken),
 }
 
 // todo: fill this out.s
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("{0}")]
+    #[error("ParseError: {0}")]
     ScanError(#[from] ScanError),
-    #[error("{msg} expected {expected} but recieved {recieved}")]
+    #[error("ParseError: {msg} expected {expected} but recieved {recieved}")]
     UnexpectedToken {
         expected: TokenType,
         recieved: String,
         msg: &'static str,
     },
-    #[error("unexpected end of file")]
+    #[error("ParseError: unexpected end of file")]
     UnexpectedEof,
-    #[error("{0}")]
+    #[error("ParseError: {0}")]
     ConversionError(#[from] ConversionError),
 }
