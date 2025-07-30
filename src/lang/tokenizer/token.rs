@@ -53,6 +53,7 @@ pub enum TokenType {
     Var,
     While,
     Break,
+    Continue,
 
     // End of file
     Eof,
@@ -104,6 +105,7 @@ impl fmt::Display for TokenType {
             TokenType::Var => "'var'",
             TokenType::While => "'while'",
             TokenType::Break => "'break'",
+            TokenType::Continue => "'continue'",
             TokenType::Eof => "'eof'",
         };
         write!(f, "{}", representation)

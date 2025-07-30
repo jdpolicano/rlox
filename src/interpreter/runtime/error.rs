@@ -8,6 +8,7 @@ pub enum BinaryError {
     LeftSide,
     RightSide,
     InvalidOperator,
+    InvalidTypes,
 }
 
 #[derive(Error, Debug, Clone)]

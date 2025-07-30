@@ -13,10 +13,10 @@ pub enum Value {
 impl From<ast::Literal> for Value {
     fn from(value: ast::Literal) -> Self {
         match value {
-            ast::Literal::Boolean { value, view: _ } => Value::Boolean(value),
-            ast::Literal::String { value, view: _ } => Value::String(value),
-            ast::Literal::Number { value, view: _ } => Value::Number(value),
-            ast::Literal::Nil { view: _ } => Value::Nil,
+            ast::Literal::Boolean { value, .. } => Value::Boolean(value),
+            ast::Literal::String { value, .. } => Value::String(value),
+            ast::Literal::Number { value, .. } => Value::Number(value),
+            ast::Literal::Nil { .. } => Value::Nil,
         }
     }
 }
@@ -24,10 +24,10 @@ impl From<ast::Literal> for Value {
 impl From<&ast::Literal> for Value {
     fn from(value: &ast::Literal) -> Self {
         match value {
-            ast::Literal::Boolean { value, view: _ } => Value::Boolean(*value),
-            ast::Literal::String { value, view: _ } => Value::String(value.clone()),
-            ast::Literal::Number { value, view: _ } => Value::Number(*value),
-            ast::Literal::Nil { view: _ } => Value::Nil,
+            ast::Literal::Boolean { value, .. } => Value::Boolean(*value),
+            ast::Literal::String { value, .. } => Value::String(value.clone()),
+            ast::Literal::Number { value, .. } => Value::Number(*value),
+            ast::Literal::Nil { .. } => Value::Nil,
         }
     }
 }
@@ -72,6 +72,7 @@ impl Value {
         match self {
             Value::Boolean(b) => *b,
             Value::Nil => false,
+            Value::Number(n) if *n == 0f64 => false,
             _ => true,
         }
     }
@@ -86,9 +87,34 @@ impl Value {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum Control {
+    Break,
+    Continue,
+    // Return(Value) - saving this for when we implement functions :)
+}
+
+impl Control {
+    fn type_str(&self) -> &str {
+        match self {
+            Self::Break => "break",
+            Self::Continue => "continue",
+        }
+    }
+}
+
+impl fmt::Display for Control {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Break | Self::Continue => Ok(()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum LoxObject {
     Value(Value),
+    Control(Control),
 }
 
 impl From<ast::Literal> for LoxObject {
@@ -134,6 +160,7 @@ impl fmt::Display for LoxObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LoxObject::Value(prim) => write!(f, "{}", prim),
+            LoxObject::Control(ctrl) => write!(f, "{}", ctrl),
         }
     }
 }
@@ -154,6 +181,14 @@ impl PartialEq for LoxObject {
 impl LoxObject {
     pub fn new_nil() -> Self {
         Self::Value(Value::Nil)
+    }
+
+    pub fn new_break() -> Self {
+        Self::Control(Control::Break)
+    }
+
+    pub fn new_continue() -> Self {
+        Self::Control(Control::Continue)
     }
 
     pub fn is_number(&self) -> bool {
@@ -180,6 +215,27 @@ impl LoxObject {
     pub fn is_nil(&self) -> bool {
         match self {
             LoxObject::Value(Value::Nil) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_break(&self) -> bool {
+        match self {
+            Self::Control(ctrl) => *ctrl == Control::Break,
+            _ => false,
+        }
+    }
+
+    pub fn is_continue(&self) -> bool {
+        match self {
+            Self::Control(ctrl) => *ctrl == Control::Continue,
+            _ => false,
+        }
+    }
+
+    pub fn is_control(&self) -> bool {
+        match self {
+            Self::Control(_) => true,
             _ => false,
         }
     }
@@ -219,12 +275,14 @@ impl LoxObject {
     pub fn truthy(&self) -> bool {
         match self {
             LoxObject::Value(prim) => prim.truthy(),
+            _ => false,
         }
     }
 
-    pub fn type_str(&self) -> &'static str {
+    pub fn type_str(&self) -> &str {
         match self {
             LoxObject::Value(p) => p.type_str(),
+            LoxObject::Control(ctrl) => ctrl.type_str(),
         }
     }
 }

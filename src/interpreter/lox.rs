@@ -1,7 +1,9 @@
 use super::runtime::error::{BinaryError, LoxError};
-use crate::interpreter::runtime::scope::Scope;
+use super::runtime::scope::Scope;
 use crate::interpreter::runtime::value::LoxObject;
-use crate::lang::tree::ast::{BinaryOperator, Expr, Identifier, Literal, Stmt, UnaryPrefix};
+use crate::lang::tree::ast::{
+    BinaryOperator, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
+};
 use crate::lang::visitor::Visitor;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -10,17 +12,15 @@ use std::rc::Rc;
 type LoxResult = Result<LoxObject, LoxError>;
 
 pub struct Lox {
-    global_scope: Rc<RefCell<Scope>>,
-    current_scope: Scope,
+    current_scope: Rc<RefCell<Scope>>,
+    inside_loop: bool,
 }
 
 impl Lox {
     pub fn new() -> Self {
-        let global_scope = Rc::new(RefCell::new(Scope::default()));
-        let current_scope = Scope::from(global_scope.clone());
         Self {
-            global_scope,
-            current_scope,
+            current_scope: Rc::new(RefCell::new(Scope::default())),
+            inside_loop: false,
         }
     }
 
@@ -29,6 +29,34 @@ impl Lox {
             let _ = stmt.accept(self)?;
         }
         Ok(())
+    }
+
+    fn create_scope(&mut self) {
+        let next = Scope::default().with_parent(self.current_scope.clone());
+        self.current_scope = Rc::new(RefCell::new(next));
+    }
+
+    fn shed_scope(&mut self) {
+        let parent = self.current_scope.borrow().parent();
+        if let Some(p) = parent {
+            self.current_scope = p
+        }
+    }
+
+    fn resolve(&self, key: &str) -> Option<LoxObject> {
+        self.current_scope.borrow().get(key)
+    }
+
+    fn bind_local(&self, key: &str, value: LoxObject) -> Option<LoxObject> {
+        self.current_scope.borrow_mut().set_local(key, value)
+    }
+
+    fn bind(&self, key: &str, value: LoxObject) -> Option<LoxObject> {
+        self.current_scope.borrow_mut().set(key, value)
+    }
+
+    fn toggle_loop(&mut self) {
+        self.inside_loop = !self.inside_loop;
     }
 }
 
@@ -41,6 +69,24 @@ impl Visitor<LoxResult> for Lox {
             Err(err_type) => Err(binary_op_error(&l, &r, op, err_type)),
         }
     }
+
+    fn visit_logical(&mut self, left: &Expr, op: LogicalOperator, right: &Expr) -> LoxResult {
+        let lhs = left.accept(self)?;
+        match op {
+            LogicalOperator::And { .. } => {
+                if !lhs.truthy() {
+                    return Ok(lhs);
+                }
+            }
+            LogicalOperator::Or { .. } => {
+                if lhs.truthy() {
+                    return Ok(lhs);
+                }
+            }
+        };
+        right.accept(self)
+    }
+
     fn visit_grouping(&mut self, expr: &Expr) -> LoxResult {
         expr.accept(self)
     }
@@ -57,6 +103,22 @@ impl Visitor<LoxResult> for Lox {
         }
     }
 
+    fn visit_variable(&mut self, ident: &Identifier) -> LoxResult {
+        if let Some(v) = self.resolve(ident.name_str()) {
+            Ok(v)
+        } else {
+            Err(reference_error(ident))
+        }
+    }
+
+    fn visit_assignment(&mut self, ident: &Identifier, value: &Expr) -> LoxResult {
+        let value = value.accept(self)?;
+        if let Some(_) = self.bind(ident.name_str(), value.clone()) {
+            return Ok(value);
+        };
+        Err(reference_error(ident))
+    }
+
     fn visit_expression_statement(&mut self, expr: &Expr) -> LoxResult {
         expr.accept(self)
     }
@@ -71,44 +133,84 @@ impl Visitor<LoxResult> for Lox {
         let value = expr
             .map(|e| e.accept(self))
             .unwrap_or(Ok(LoxObject::new_nil()))?;
-        self.current_scope.declare(ident.name_str(), value);
+        self.bind_local(ident.name_str(), value);
         Ok(LoxObject::new_nil())
     }
 
-    fn visit_variable(&mut self, ident: &Identifier) -> LoxResult {
-        if let Some(v) = self.current_scope.resolve(ident.name_str()) {
-            Ok(v)
-        } else {
-            Err(reference_error(ident))
+    fn visit_block_statement(&mut self, statments: &[Stmt]) -> LoxResult {
+        // create a new scope
+        self.create_scope();
+        let mut ret = LoxObject::new_nil();
+        for stmt in statments {
+            let v = stmt.accept(self)?;
+            if v.is_control() {
+                ret = v;
+                break;
+            }
         }
+        self.shed_scope();
+        Ok(ret)
+    }
+
+    fn visit_if_statement(
+        &mut self,
+        condition: &Expr,
+        if_block: &Stmt,
+        else_block: Option<&Stmt>,
+    ) -> LoxResult {
+        if condition.accept(self)?.truthy() {
+            if_block.accept(self)
+        } else if let Some(else_block) = else_block {
+            else_block.accept(self)
+        } else {
+            Ok(LoxObject::new_nil())
+        }
+    }
+
+    fn visit_while_statement(&mut self, condition: &Expr, block: &Stmt) -> LoxResult {
+        while condition.accept(self)?.truthy() {
+            let v = block.accept(self)?;
+            if v.is_break() {
+                break;
+            }
+        }
+        Ok(LoxObject::new_nil())
+    }
+
+    fn visit_break(&mut self) -> LoxResult {
+        Ok(LoxObject::new_break())
+    }
+
+    fn visit_continue(&mut self) -> LoxResult {
+        Ok(LoxObject::new_continue())
     }
 }
 
 fn unary_op(value: &LoxObject, op: UnaryPrefix) -> Result<LoxObject, BinaryError> {
     match op {
-        UnaryPrefix::Bang { view: _ } => Ok(value.truthy().into()),
-        UnaryPrefix::Minus { view: _ } => apply_math_op(value, &(-1.0).into(), |a, b| a * b),
+        UnaryPrefix::Bang { .. } => Ok(value.truthy().into()),
+        UnaryPrefix::Minus { .. } => apply_math_op(value, &(-1.0).into(), |a, b| a * b),
     }
 }
 
 fn binary_op(l: &LoxObject, r: &LoxObject, op: BinaryOperator) -> Result<LoxObject, BinaryError> {
     match op {
         // addition is a special case where we need to handle string concatenation.
-        BinaryOperator::Plus { view: _ } => {
+        BinaryOperator::Plus { .. } => {
             if l.is_number() && r.is_number() {
                 apply_math_op(l, r, |a, b| a + b)
             } else {
                 concat_strings(l, r)
             }
         }
-        BinaryOperator::Minus { view: _ } => apply_math_op(l, r, |a, b| a - b),
-        BinaryOperator::Slash { view: _ } => apply_math_op(l, r, |a, b| a / b),
-        BinaryOperator::Greater { view: _ } => apply_comparison(l, r, |a, b| a > b),
-        BinaryOperator::GreaterEqual { view: _ } => apply_comparison(l, r, |a, b| a >= b),
-        BinaryOperator::Less { view: _ } => apply_comparison(l, r, |a, b| a < b),
-        BinaryOperator::LessEqual { view: _ } => apply_comparison(l, r, |a, b| a <= b),
-        BinaryOperator::Equal { view: _ } => Ok(LoxObject::from(l == r)),
-        BinaryOperator::NotEqual { view: _ } => Ok(LoxObject::from(l != r)),
+        BinaryOperator::Minus { .. } => apply_math_op(l, r, |a, b| a - b),
+        BinaryOperator::Slash { .. } => apply_math_op(l, r, |a, b| a / b),
+        BinaryOperator::Greater { .. } => apply_comparison(l, r, |a, b| a > b),
+        BinaryOperator::GreaterEqual { .. } => apply_comparison(l, r, |a, b| a >= b),
+        BinaryOperator::Less { .. } => apply_comparison(l, r, |a, b| a < b),
+        BinaryOperator::LessEqual { .. } => apply_comparison(l, r, |a, b| a <= b),
+        BinaryOperator::Equal { .. } => Ok(LoxObject::from(l == r)),
+        BinaryOperator::NotEqual { .. } => Ok(LoxObject::from(l != r)),
         _ => Err(BinaryError::InvalidOperator),
     }
 }
@@ -120,7 +222,7 @@ fn concat_strings(l: &LoxObject, r: &LoxObject) -> Result<LoxObject, BinaryError
         (Some(a), Some(b)) => Ok(LoxObject::from((a.as_str(), b.as_str()))),
         // it really doesn't matter what side was a string
         // So just let the user know the right side was different than the left side.
-        _ => Err(BinaryError::RightSide),
+        _ => Err(BinaryError::InvalidTypes),
     }
 }
 
@@ -167,23 +269,18 @@ fn binary_op_error(
     err_type: BinaryError,
 ) -> LoxError {
     let msg = match err_type {
-        BinaryError::LeftSide => {
-            format!(
-                "lefthand side incorrect type \"{}\" for op {}",
-                l.type_str(),
-                op
-            )
-        }
-        BinaryError::RightSide => {
-            format!(
-                "righthand side incorrect type \"{}\" for op {}",
-                r.type_str(),
-                op
-            )
-        }
-        BinaryError::InvalidOperator => {
-            format!("invalid binary operator {}", op)
-        }
+        BinaryError::LeftSide => format!(
+            "lefthand side incorrect type '{}' for op {}",
+            l.type_str(),
+            op
+        ),
+        BinaryError::RightSide => format!(
+            "righthand side incorrect type '{}' for op {}",
+            r.type_str(),
+            op
+        ),
+        BinaryError::InvalidOperator => format!("invalid binary operator {}", op),
+        _ => format!("cannot add '{}' + {}'", l.type_str(), r.type_str()),
     };
 
     LoxError::TypeError {

@@ -23,6 +23,7 @@ pub const LOX_KEYWORDS: &[(&str, TokenType)] = &[
     ("var", TokenType::Var),
     ("while", TokenType::While),
     ("break", TokenType::Break),
+    ("continue", TokenType::Continue),
 ];
 
 #[derive(Clone, Copy)]
@@ -349,7 +350,6 @@ fn make_keyword_map() -> HashMap<&'static str, TokenType> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::view::View;
 
     #[test]
     fn test_scan_single_tokens() {

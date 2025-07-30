@@ -1,5 +1,6 @@
 use crate::lang::tokenizer::error::ScanError;
 use crate::lang::tokenizer::token::{OwnedToken, TokenType};
+use crate::lang::view::View;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -8,6 +9,8 @@ pub enum ConversionError {
     InvalidBinaryOperator(OwnedToken),
     #[error("Invalid unary operator conversion {0}")]
     InvalidUnaryOperator(OwnedToken),
+    #[error("Invalid logical operator conversion {0}")]
+    InvalidLogicalOperator(OwnedToken),
     #[error("Invalid literal conversion {0}")]
     InvalidLiteralType(OwnedToken),
     #[error("Failed to convert src string to a number {0}")]
@@ -19,16 +22,20 @@ pub enum ConversionError {
 // todo: fill this out.s
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("ParseError: {0}")]
+    #[error("SyntaxError: {0}")]
     ScanError(#[from] ScanError),
-    #[error("ParseError: {msg} expected {expected} but recieved {recieved}")]
+    #[error("SyntaxError: {0}")]
+    ConversionError(#[from] ConversionError),
+    #[error("SyntaxError: {msg} expected {expected} but recieved {recieved}")]
     UnexpectedToken {
         expected: TokenType,
         recieved: String,
         msg: &'static str,
     },
-    #[error("ParseError: unexpected end of file")]
+    #[error("SyntaxError: cannot assign to type '{type_str}' {location}")]
+    UnexpectedAssignment { type_str: String, location: View },
+    #[error("SyntaxError: cannot use '{type_str}' out side of a loop {location}")]
+    InvalidLoopKeyword { type_str: String, location: View },
+    #[error("SyntaxError: unexpected end of file")]
     UnexpectedEof,
-    #[error("ParseError: {0}")]
-    ConversionError(#[from] ConversionError),
 }

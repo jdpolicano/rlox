@@ -1,12 +1,28 @@
-use super::tree::ast::{BinaryOperator, Expr, Identifier, Literal, UnaryPrefix};
+use super::tree::ast::{
+    BinaryOperator, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
+};
 
 pub trait Visitor<T> {
+    // expressions
     fn visit_binary(&mut self, left: &Expr, op: BinaryOperator, right: &Expr) -> T;
+    fn visit_logical(&mut self, left: &Expr, op: LogicalOperator, right: &Expr) -> T;
     fn visit_grouping(&mut self, expr: &Expr) -> T;
     fn visit_literal(&mut self, value: &Literal) -> T;
     fn visit_unary(&mut self, prefix: UnaryPrefix, expr: &Expr) -> T;
     fn visit_variable(&mut self, name: &Identifier) -> T;
+    fn visit_assignment(&mut self, name: &Identifier, value: &Expr) -> T;
+    // statments
     fn visit_expression_statement(&mut self, expr: &Expr) -> T;
     fn visit_print_statement(&mut self, expr: &Expr) -> T;
     fn visit_var_statement(&mut self, name: &Identifier, expr: Option<&Expr>) -> T;
+    fn visit_block_statement(&mut self, statments: &[Stmt]) -> T;
+    fn visit_if_statement(
+        &mut self,
+        condition: &Expr,
+        if_block: &Stmt,
+        else_block: Option<&Stmt>,
+    ) -> T;
+    fn visit_while_statement(&mut self, condition: &Expr, block: &Stmt) -> T;
+    fn visit_break(&mut self) -> T;
+    fn visit_continue(&mut self) -> T;
 }

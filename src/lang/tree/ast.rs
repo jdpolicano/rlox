@@ -45,16 +45,16 @@ impl TryFrom<Token<'_>> for BinaryOperator {
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Equal { view: _ } => write!(f, "'=='"),
-            Self::NotEqual { view: _ } => write!(f, "'!='"),
-            Self::Less { view: _ } => write!(f, "'<'"),
-            Self::LessEqual { view: _ } => write!(f, "'<='"),
-            Self::Greater { view: _ } => write!(f, "'>'"),
-            Self::GreaterEqual { view: _ } => write!(f, "'>='"),
-            Self::Plus { view: _ } => write!(f, "'+'"),
-            Self::Minus { view: _ } => write!(f, "'-'"),
-            Self::Star { view: _ } => write!(f, "'*'"),
-            Self::Slash { view: _ } => write!(f, "'/'"),
+            Self::Equal { .. } => write!(f, "'=='"),
+            Self::NotEqual { .. } => write!(f, "'!='"),
+            Self::Less { .. } => write!(f, "'<'"),
+            Self::LessEqual { .. } => write!(f, "'<='"),
+            Self::Greater { .. } => write!(f, "'>'"),
+            Self::GreaterEqual { .. } => write!(f, "'>='"),
+            Self::Plus { .. } => write!(f, "'+'"),
+            Self::Minus { .. } => write!(f, "'-'"),
+            Self::Star { .. } => write!(f, "'*'"),
+            Self::Slash { .. } => write!(f, "'/'"),
         }
     }
 }
@@ -72,6 +72,43 @@ impl BinaryOperator {
             Self::Minus { view } => *view,
             Self::Star { view } => *view,
             Self::Slash { view } => *view,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum LogicalOperator {
+    And { view: View },
+    Or { view: View },
+}
+
+impl TryFrom<Token<'_>> for LogicalOperator {
+    type Error = ConversionError;
+    fn try_from(value: Token<'_>) -> Result<Self, Self::Error> {
+        match value.token_type {
+            TokenType::And => Ok(LogicalOperator::And { view: value.pos }),
+            TokenType::Or => Ok(LogicalOperator::Or { view: value.pos }),
+            _ => {
+                return Err(ConversionError::InvalidLogicalOperator(value.into()));
+            }
+        }
+    }
+}
+
+impl fmt::Display for LogicalOperator {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::And { .. } => write!(f, "and'"),
+            Self::Or { .. } => write!(f, "'or'"),
+        }
+    }
+}
+
+impl LogicalOperator {
+    pub fn view(&self) -> View {
+        match self {
+            Self::And { view } => *view,
+            Self::Or { view } => *view,
         }
     }
 }
@@ -99,8 +136,8 @@ impl TryFrom<Token<'_>> for UnaryPrefix {
 impl fmt::Display for UnaryPrefix {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Bang { view: _ } => write!(f, "'!'"),
-            Self::Minus { view: _ } => write!(f, "'-'"),
+            Self::Bang { .. } => write!(f, "'!'"),
+            Self::Minus { .. } => write!(f, "'-'"),
         }
     }
 }
@@ -175,15 +212,15 @@ impl TryFrom<Token<'_>> for Literal {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Literal::Number { value, view: _ } => write!(f, "{}", value),
-            Literal::String { value, view: _ } => write!(f, "\"{}\"", value),
-            Literal::Boolean { value, view: _ } => write!(f, "{}", value),
-            Literal::Nil { view: _ } => write!(f, "nil"),
+            Literal::Number { value, .. } => write!(f, "{}", value),
+            Literal::String { value, .. } => write!(f, "\"{}\"", value),
+            Literal::Boolean { value, .. } => write!(f, "{}", value),
+            Literal::Nil { .. } => write!(f, "nil"),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Identifier {
     name: String,
     view: View,
@@ -226,6 +263,12 @@ pub enum Expr {
         right: Box<Expr>,
     },
 
+    Logical {
+        left: Box<Expr>,
+        op: LogicalOperator,
+        right: Box<Expr>,
+    },
+
     Grouping {
         expr: Box<Expr>,
     },
@@ -242,6 +285,14 @@ pub enum Expr {
     Variable {
         value: Identifier,
     },
+
+    Assignment {
+        name: Identifier,
+        value: Box<Expr>,
+    },
+
+    Break,
+    Continue,
 }
 
 impl Expr {
@@ -252,6 +303,24 @@ impl Expr {
             Expr::Literal { value } => v.visit_literal(value),
             Expr::Unary { prefix, value } => v.visit_unary(*prefix, value),
             Expr::Variable { value } => v.visit_variable(value),
+            Expr::Assignment { name, value } => v.visit_assignment(name, value),
+            Expr::Logical { left, op, right } => v.visit_logical(left, *op, right),
+            Expr::Break => v.visit_break(),
+            Expr::Continue => v.visit_continue(),
+        }
+    }
+
+    pub fn type_str(&self) -> &str {
+        match self {
+            Expr::Binary { .. } => "binary",
+            Expr::Grouping { .. } => "grouping",
+            Expr::Literal { .. } => "literal",
+            Expr::Unary { .. } => "unary",
+            Expr::Variable { .. } => "var",
+            Expr::Assignment { .. } => "assignment",
+            Expr::Logical { .. } => "logical",
+            Expr::Break { .. } => "break",
+            Expr::Continue { .. } => "continue",
         }
     }
 }
@@ -261,12 +330,29 @@ pub enum Stmt {
     Expression {
         expr: Expr,
     },
+
     Print {
         expr: Expr,
     },
+
     Var {
         name: Identifier,
         initializer: Option<Expr>,
+    },
+
+    Block {
+        statements: Vec<Stmt>,
+    },
+
+    If {
+        condition: Expr,
+        if_block: Box<Stmt>,
+        else_block: Option<Box<Stmt>>,
+    },
+
+    While {
+        condition: Expr,
+        block: Box<Stmt>,
     },
 }
 
@@ -275,7 +361,29 @@ impl Stmt {
         match self {
             Stmt::Expression { expr } => v.visit_expression_statement(expr),
             Stmt::Print { expr } => v.visit_print_statement(expr),
-            Self::Var { name, initializer } => v.visit_var_statement(name, initializer.as_ref()),
+            Stmt::Var { name, initializer } => v.visit_var_statement(name, initializer.as_ref()),
+            Stmt::Block { statements } => v.visit_block_statement(statements),
+            Self::If {
+                condition,
+                if_block,
+                else_block,
+            } => v.visit_if_statement(
+                condition,
+                if_block,
+                else_block.as_ref().map(|stmt| stmt.as_ref()),
+            ),
+            Self::While { condition, block } => v.visit_while_statement(condition, block),
+        }
+    }
+
+    pub fn type_str(&self) -> &str {
+        match self {
+            Stmt::Expression { .. } => "expression",
+            Stmt::Print { .. } => "print",
+            Stmt::Var { .. } => "var",
+            Stmt::Block { .. } => "block",
+            Self::If { .. } => "if",
+            Self::While { .. } => "while",
         }
     }
 }
