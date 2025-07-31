@@ -1,10 +1,9 @@
 use rloxv2::interpreter::lox::Lox;
 use rloxv2::lang::tree::parser::Parser;
 const INPUT: &str = r#"
-var i = 0;
-while(i < 1000000) {
-    print i;
-}
+var my_clock = clock;
+print my_clock();
+print my_clock;
 "#;
 
 fn main() {

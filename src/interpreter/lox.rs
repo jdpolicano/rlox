@@ -1,9 +1,12 @@
-use super::runtime::error::{BinaryError, LoxError};
-use super::runtime::scope::Scope;
-use crate::interpreter::runtime::value::LoxObject;
+use crate::interpreter::runtime::error::{BinaryError, LoxError};
+use crate::interpreter::runtime::eval::{Eval, EvalResult};
+use crate::interpreter::runtime::native::setup_native;
+use crate::interpreter::runtime::object::LoxObject;
+use crate::interpreter::runtime::scope::Scope;
 use crate::lang::tree::ast::{
-    BinaryOperator, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
+    BinaryOperator, Callee, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
 };
+use crate::lang::view::View;
 use crate::lang::visitor::Visitor;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,15 +16,15 @@ type LoxResult = Result<LoxObject, LoxError>;
 
 pub struct Lox {
     current_scope: Rc<RefCell<Scope>>,
-    inside_loop: bool,
 }
 
 impl Lox {
     pub fn new() -> Self {
-        Self {
+        let mut me = Self {
             current_scope: Rc::new(RefCell::new(Scope::default())),
-            inside_loop: false,
-        }
+        };
+        setup_native(&mut me);
+        me
     }
 
     pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), LoxError> {
@@ -31,46 +34,42 @@ impl Lox {
         Ok(())
     }
 
-    fn create_scope(&mut self) {
+    pub fn create_scope(&mut self) {
         let next = Scope::default().with_parent(self.current_scope.clone());
         self.current_scope = Rc::new(RefCell::new(next));
     }
 
-    fn shed_scope(&mut self) {
+    pub fn shed_scope(&mut self) {
         let parent = self.current_scope.borrow().parent();
         if let Some(p) = parent {
             self.current_scope = p
         }
     }
 
-    fn resolve(&self, key: &str) -> Option<LoxObject> {
+    pub fn resolve(&self, key: &str) -> Option<LoxObject> {
         self.current_scope.borrow().get(key)
     }
 
-    fn bind_local(&self, key: &str, value: LoxObject) -> Option<LoxObject> {
+    pub fn bind_local(&mut self, key: &str, value: LoxObject) -> Option<LoxObject> {
         self.current_scope.borrow_mut().set_local(key, value)
     }
 
-    fn bind(&self, key: &str, value: LoxObject) -> Option<LoxObject> {
+    pub fn bind(&mut self, key: &str, value: LoxObject) -> Option<LoxObject> {
         self.current_scope.borrow_mut().set(key, value)
-    }
-
-    fn toggle_loop(&mut self) {
-        self.inside_loop = !self.inside_loop;
     }
 }
 
-impl Visitor<LoxResult> for Lox {
-    fn visit_binary(&mut self, left: &Expr, op: BinaryOperator, right: &Expr) -> LoxResult {
-        let l = left.accept(self)?;
-        let r = right.accept(self)?;
+impl Visitor<EvalResult> for Lox {
+    fn visit_binary(&mut self, left: &Expr, op: BinaryOperator, right: &Expr) -> EvalResult {
+        let l = unwrap_to_type_error("binary", left.accept(self)?, op.view())?;
+        let r = unwrap_to_type_error("binary", right.accept(self)?, op.view())?;
         match binary_op(&l, &r, op) {
-            Ok(v) => Ok(v),
+            Ok(v) => Ok(v.into()),
             Err(err_type) => Err(binary_op_error(&l, &r, op, err_type)),
         }
     }
 
-    fn visit_logical(&mut self, left: &Expr, op: LogicalOperator, right: &Expr) -> LoxResult {
+    fn visit_logical(&mut self, left: &Expr, op: LogicalOperator, right: &Expr) -> EvalResult {
         let lhs = left.accept(self)?;
         match op {
             LogicalOperator::And { .. } => {
@@ -87,60 +86,91 @@ impl Visitor<LoxResult> for Lox {
         right.accept(self)
     }
 
-    fn visit_grouping(&mut self, expr: &Expr) -> LoxResult {
+    fn visit_grouping(&mut self, expr: &Expr) -> EvalResult {
         expr.accept(self)
     }
 
-    fn visit_literal(&mut self, value: &Literal) -> LoxResult {
-        Ok(value.into())
+    fn visit_literal(&mut self, value: &Literal) -> EvalResult {
+        Ok(LoxObject::from(value).into())
     }
 
-    fn visit_unary(&mut self, prefix: UnaryPrefix, expr: &Expr) -> LoxResult {
-        let value = expr.accept(self)?;
+    fn visit_unary(&mut self, prefix: UnaryPrefix, expr: &Expr) -> EvalResult {
+        let eval = expr.accept(self)?;
+        let value = unwrap_to_type_error("unary", eval, prefix.view())?;
         match unary_op(&value, prefix) {
-            Ok(v) => Ok(v),
+            Ok(v) => Ok(v.into()),
             Err(_) => Err(unary_prefix_error(&value, prefix)),
         }
     }
 
-    fn visit_variable(&mut self, ident: &Identifier) -> LoxResult {
+    fn visit_variable(&mut self, ident: &Identifier) -> EvalResult {
         if let Some(v) = self.resolve(ident.name_str()) {
-            Ok(v)
+            Ok(v.into())
         } else {
             Err(reference_error(ident))
         }
     }
 
-    fn visit_assignment(&mut self, ident: &Identifier, value: &Expr) -> LoxResult {
-        let value = value.accept(self)?;
+    fn visit_assignment(&mut self, ident: &Identifier, value: &Expr) -> EvalResult {
+        let eval = value.accept(self)?;
+        let value = unwrap_to_type_error("assignment", eval, ident.view())?;
         if let Some(_) = self.bind(ident.name_str(), value.clone()) {
-            return Ok(value);
+            return Ok(value.into());
         };
         Err(reference_error(ident))
     }
 
-    fn visit_expression_statement(&mut self, expr: &Expr) -> LoxResult {
+    fn visit_break(&mut self) -> EvalResult {
+        Ok(Eval::new_break())
+    }
+
+    fn visit_continue(&mut self) -> EvalResult {
+        Ok(Eval::new_continue().into())
+    }
+
+    fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> EvalResult {
+        let result = callee.expr.accept(self)?;
+        let call_obj = unwrap_to_type_error("callee", result, callee.view())?;
+        match call_obj {
+            LoxObject::Native(f) => {
+                let mut rt_args = Vec::with_capacity(args.len());
+                for arg in args {
+                    rt_args.push(arg.accept(self)?)
+                }
+                let v = f(self, &rt_args)?;
+                Ok(v.into())
+            }
+            _ => Err(LoxError::DebugError("this shouldn't be reachable")),
+        }
+    }
+
+    fn visit_expression_statement(&mut self, expr: &Expr) -> EvalResult {
         expr.accept(self)
     }
 
-    fn visit_print_statement(&mut self, expr: &Expr) -> LoxResult {
+    fn visit_print_statement(&mut self, expr: &Expr) -> EvalResult {
         let v = expr.accept(self)?;
-        println!("{}", v);
+        v.with_object(|obj| println!("{}", obj));
         Ok(v)
     }
 
-    fn visit_var_statement(&mut self, ident: &Identifier, expr: Option<&Expr>) -> LoxResult {
+    fn visit_var_statement(&mut self, ident: &Identifier, expr: Option<&Expr>) -> EvalResult {
         let value = expr
             .map(|e| e.accept(self))
-            .unwrap_or(Ok(LoxObject::new_nil()))?;
-        self.bind_local(ident.name_str(), value);
-        Ok(LoxObject::new_nil())
+            .unwrap_or(Ok(Eval::new_nil()))?;
+        match value {
+            Eval::Object(obj) => {
+                self.bind_local(ident.name_str(), obj);
+                Ok(Eval::new_nil())
+            }
+            _ => Err(type_error("", value.type_str(), ident.view())),
+        }
     }
 
-    fn visit_block_statement(&mut self, statments: &[Stmt]) -> LoxResult {
+    fn visit_block_statement(&mut self, statments: &[Stmt]) -> EvalResult {
         // create a new scope
         self.create_scope();
-        let mut ret = LoxObject::new_nil();
+        let mut ret = Eval::new_nil();
         for stmt in statments {
             let v = stmt.accept(self)?;
             if v.is_control() {
@@ -148,8 +178,9 @@ impl Visitor<LoxResult> for Lox {
                 break;
             }
         }
+        // get rid of the temporary scope we created.
         self.shed_scope();
-        Ok(ret)
+        Ok(Eval::from(ret))
     }
 
     fn visit_if_statement(
@@ -157,32 +188,24 @@ impl Visitor<LoxResult> for Lox {
         condition: &Expr,
         if_block: &Stmt,
         else_block: Option<&Stmt>,
-    ) -> LoxResult {
+    ) -> EvalResult {
         if condition.accept(self)?.truthy() {
             if_block.accept(self)
         } else if let Some(else_block) = else_block {
             else_block.accept(self)
         } else {
-            Ok(LoxObject::new_nil())
+            Ok(Eval::new_nil())
         }
     }
 
-    fn visit_while_statement(&mut self, condition: &Expr, block: &Stmt) -> LoxResult {
+    fn visit_while_statement(&mut self, condition: &Expr, block: &Stmt) -> EvalResult {
         while condition.accept(self)?.truthy() {
             let v = block.accept(self)?;
             if v.is_break() {
                 break;
             }
         }
-        Ok(LoxObject::new_nil())
-    }
-
-    fn visit_break(&mut self) -> LoxResult {
-        Ok(LoxObject::new_break())
-    }
-
-    fn visit_continue(&mut self) -> LoxResult {
-        Ok(LoxObject::new_continue())
+        Ok(LoxObject::new_nil().into())
     }
 }
 
@@ -301,5 +324,21 @@ fn reference_error(ident: &Identifier) -> LoxError {
     LoxError::ReferenceError {
         name: ident.name_str().to_string(),
         view: ident.view(),
+    }
+}
+
+fn type_error(ctx: &str, type_str: &str, view: View) -> LoxError {
+    let msg = if ctx.len() > 0 {
+        format!("unexpected type '{}' {}", type_str, ctx)
+    } else {
+        format!("unexpected type '{}'", type_str)
+    };
+    LoxError::TypeError { msg, view }
+}
+
+fn unwrap_to_type_error(ctx: &str, eval: Eval, view: View) -> Result<LoxObject, LoxError> {
+    match eval {
+        Eval::Object(obj) => Ok(obj),
+        Eval::Ctrl(ctrl) => Err(type_error(ctx, ctrl.type_str(), view)),
     }
 }

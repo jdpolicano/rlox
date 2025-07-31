@@ -1,5 +1,5 @@
 use super::tree::ast::{
-    BinaryOperator, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
+    BinaryOperator, Callee, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
 };
 
 pub trait Visitor<T> {
@@ -11,6 +11,7 @@ pub trait Visitor<T> {
     fn visit_unary(&mut self, prefix: UnaryPrefix, expr: &Expr) -> T;
     fn visit_variable(&mut self, name: &Identifier) -> T;
     fn visit_assignment(&mut self, name: &Identifier, value: &Expr) -> T;
+    fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> T;
     // statments
     fn visit_expression_statement(&mut self, expr: &Expr) -> T;
     fn visit_print_statement(&mut self, expr: &Expr) -> T;

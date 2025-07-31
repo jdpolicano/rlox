@@ -2,9 +2,11 @@ use super::ast::Expr;
 use super::error::ParseError;
 use crate::lang::tokenizer::scanner::Scanner;
 use crate::lang::tokenizer::token::{Token, TokenType};
-use crate::lang::tree::ast::{BinaryOperator, Identifier, Literal, Stmt};
+use crate::lang::tree::ast::{BinaryOperator, Callee, Identifier, Literal, Stmt};
 use crate::lang::view::View;
 use std::iter::{Iterator, Peekable};
+
+const MAX_FUNC_ARGS: usize = 255;
 
 struct TokenStream<'a> {
     tokens: Peekable<Scanner<'a>>,
@@ -76,7 +78,7 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse(&mut self) {
-        while !self.is_done() {
+        while !self.take_done() {
             match self.declaration() {
                 Ok(stmt) => self.statements.push(stmt),
                 Err(e) => {
@@ -97,7 +99,7 @@ impl<'a> Parser<'a> {
     }
 
     fn declaration(&mut self) -> Result<Stmt, ParseError> {
-        if self.is_var() {
+        if self.take_var() {
             self.var_declaration()
         } else {
             self.statement()
@@ -125,15 +127,15 @@ impl<'a> Parser<'a> {
     }
 
     fn statement(&mut self) -> Result<Stmt, ParseError> {
-        if self.is_print() {
+        if self.take_print() {
             self.print_statement()
-        } else if self.is_block() {
+        } else if self.take_block() {
             self.block_statement()
-        } else if self.is_if() {
+        } else if self.take_if() {
             self.if_statement()
-        } else if self.is_while() {
+        } else if self.take_while() {
             self.while_statement()
-        } else if self.is_for() {
+        } else if self.take_for() {
             self.for_statement()
         } else {
             self.expression_statement()
@@ -144,15 +146,15 @@ impl<'a> Parser<'a> {
         self.enter_loop();
         self.expect("for statement left parens", TokenType::LeftParen)?;
 
-        let intializer = if self.is_semicolon() {
+        let intializer = if self.take_semicolon() {
             None
-        } else if self.is_var() {
+        } else if self.take_var() {
             Some(self.var_declaration()?)
         } else {
             Some(self.expression_statement()?)
         };
 
-        let condition = if self.is_semicolon() {
+        let condition = if self.take_semicolon() {
             None
         } else {
             let expr = self.expression()?;
@@ -160,7 +162,7 @@ impl<'a> Parser<'a> {
             Some(expr)
         };
 
-        let increment = if self.is_semicolon() {
+        let increment = if self.take_semicolon() {
             None
         } else {
             Some(self.expression()?)
@@ -189,7 +191,7 @@ impl<'a> Parser<'a> {
 
         let if_block = Box::new(self.statement()?);
 
-        let else_block = if self.is_else() {
+        let else_block = if self.take_else() {
             Some(Box::new(self.statement()?))
         } else {
             None
@@ -350,12 +352,46 @@ impl<'a> Parser<'a> {
                 value: Box::new(self.unary()?),
             })
         } else {
-            self.primary()
+            self.call()
         }
     }
 
+    fn call(&mut self) -> Result<Expr, ParseError> {
+        let mut expr = self.primary()?;
+        while let Some(paren) = self.match_open_paren() {
+            let args = self.arguments()?;
+            if args.len() > MAX_FUNC_ARGS {
+                return Err(ParseError::FuncExceedMaxArgs {
+                    max: MAX_FUNC_ARGS,
+                    location: paren.pos,
+                });
+            }
+            expr = Expr::Call {
+                callee: Callee {
+                    expr: Box::new(expr),
+                    view: paren.pos,
+                },
+                args,
+            };
+        }
+        Ok(expr)
+    }
+
+    fn arguments(&mut self) -> Result<Vec<Expr>, ParseError> {
+        let mut args = Vec::with_capacity(MAX_FUNC_ARGS);
+        if self.take_right_parens() {
+            return Ok(args);
+        }
+        args.push(self.expression()?);
+        while self.take_comma() {
+            args.push(self.expression()?);
+        }
+        self.expect("function call did not terminate", TokenType::RightParen)?;
+        Ok(args)
+    }
+
     fn primary(&mut self) -> Result<Expr, ParseError> {
-        if self.is_left_paren() {
+        if self.take_left_paren() {
             let expr = self.expression()?;
             let _ = self.expect(
                 "primary grouping did not terminate correctly",
@@ -367,7 +403,7 @@ impl<'a> Parser<'a> {
         }
 
         if let Some(t) = self.match_break() {
-            if !self.is_in_loop() {
+            if !self.take_in_loop() {
                 return Err(ParseError::InvalidLoopKeyword {
                     type_str: t.lexeme.to_string(),
                     location: t.pos,
@@ -377,7 +413,7 @@ impl<'a> Parser<'a> {
         }
 
         if let Some(t) = self.match_continue() {
-            if !self.is_in_loop() {
+            if !self.take_in_loop() {
                 return Err(ParseError::InvalidLoopKeyword {
                     type_str: t.lexeme.to_string(),
                     location: t.pos,
@@ -436,6 +472,10 @@ impl<'a> Parser<'a> {
         self.match_many(&[TokenType::Bang, TokenType::Minus])
     }
 
+    fn match_open_paren(&mut self) -> Option<Token<'a>> {
+        self.match_one(TokenType::LeftParen)
+    }
+
     fn match_and(&mut self) -> Option<Token<'a>> {
         self.match_one(TokenType::And)
     }
@@ -464,42 +504,51 @@ impl<'a> Parser<'a> {
             TokenType::SlashEqual,
         ])
     }
-    // the semantics for is_<x> statments is that it returns a bool and throws the token away.
+
+    // the semantics for take_<x> statments is that it returns a bool and throws the token away.
     // If you need to check and keep the token, use a matcher.
-    fn is_print(&mut self) -> bool {
+    fn take_print(&mut self) -> bool {
         self.match_one(TokenType::Print).is_some()
     }
 
-    fn is_block(&mut self) -> bool {
+    fn take_block(&mut self) -> bool {
         self.match_one(TokenType::LeftBrace).is_some()
     }
 
-    fn is_if(&mut self) -> bool {
+    fn take_if(&mut self) -> bool {
         self.match_one(TokenType::If).is_some()
     }
 
-    fn is_else(&mut self) -> bool {
+    fn take_else(&mut self) -> bool {
         self.match_one(TokenType::Else).is_some()
     }
 
-    fn is_while(&mut self) -> bool {
+    fn take_while(&mut self) -> bool {
         self.match_one(TokenType::While).is_some()
     }
 
-    fn is_for(&mut self) -> bool {
+    fn take_for(&mut self) -> bool {
         self.match_one(TokenType::For).is_some()
     }
 
-    fn is_semicolon(&mut self) -> bool {
+    fn take_semicolon(&mut self) -> bool {
         self.match_one(TokenType::Semicolon).is_some()
     }
 
-    fn is_var(&mut self) -> bool {
+    fn take_var(&mut self) -> bool {
         self.match_one(TokenType::Var).is_some()
     }
 
-    fn is_left_paren(&mut self) -> bool {
+    fn take_left_paren(&mut self) -> bool {
         self.match_one(TokenType::LeftParen).is_some()
+    }
+
+    fn take_comma(&mut self) -> bool {
+        self.match_one(TokenType::Comma).is_some()
+    }
+
+    fn take_right_parens(&mut self) -> bool {
+        self.match_one(TokenType::RightParen).is_some()
     }
 
     fn expect(&mut self, msg: &'static str, t: TokenType) -> Result<Token<'a>, ParseError> {
@@ -515,7 +564,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn is_done(&mut self) -> bool {
+    fn take_done(&mut self) -> bool {
         if let Some(result) = self.tokens.peek() {
             match result {
                 Ok(t) if t.token_type == TokenType::Eof => return true,
@@ -525,7 +574,7 @@ impl<'a> Parser<'a> {
         true
     }
 
-    fn is_in_loop(&self) -> bool {
+    fn take_in_loop(&self) -> bool {
         self.loop_cnt > 0
     }
 

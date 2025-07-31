@@ -1,10 +1,11 @@
-use crate::interpreter::runtime::value::LoxObject;
+use crate::interpreter::runtime::object::LoxObject;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 const DEFAULT_SCOPE_SIZE: usize = 32;
 
+#[derive(Debug)]
 pub struct Scope {
     parent: Option<Rc<RefCell<Scope>>>,
     map: HashMap<String, LoxObject>,

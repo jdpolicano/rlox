@@ -17,4 +17,14 @@ pub enum LoxError {
     TypeError { msg: String, view: View },
     #[error("ReferenceError: {name} is undefined {view}")]
     ReferenceError { name: String, view: View },
+    #[error("NativeError: {0}")]
+    NativeError(#[from] NativeError),
+    #[error("DebugError: {0}")]
+    DebugError(&'static str),
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum NativeError {
+    #[error("{0}")]
+    SystemError(String),
 }

@@ -1,4 +1,5 @@
 use super::error::ConversionError;
+use crate::lang::native::Native;
 use crate::lang::tokenizer::token::{Token, TokenType};
 use crate::lang::view::View;
 use crate::lang::visitor::Visitor;
@@ -256,6 +257,18 @@ impl TryFrom<Token<'_>> for Identifier {
 }
 
 #[derive(Debug)]
+pub struct Callee {
+    pub expr: Box<Expr>,
+    pub view: View,
+}
+
+impl Callee {
+    pub fn view(&self) -> View {
+        self.view
+    }
+}
+
+#[derive(Debug)]
 pub enum Expr {
     Binary {
         left: Box<Expr>,
@@ -291,12 +304,20 @@ pub enum Expr {
         value: Box<Expr>,
     },
 
+    Call {
+        callee: Callee,
+        args: Vec<Expr>,
+    },
+
     Break,
     Continue,
 }
 
 impl Expr {
-    pub fn accept<T>(&self, v: &mut dyn Visitor<T>) -> T {
+    pub fn accept<T, V>(&self, v: &mut V) -> T
+    where
+        V: Visitor<T>,
+    {
         match self {
             Expr::Binary { left, op, right } => v.visit_binary(left, *op, right),
             Expr::Grouping { expr } => v.visit_grouping(expr),
@@ -307,6 +328,7 @@ impl Expr {
             Expr::Logical { left, op, right } => v.visit_logical(left, *op, right),
             Expr::Break => v.visit_break(),
             Expr::Continue => v.visit_continue(),
+            Expr::Call { callee, args } => v.visit_call(callee, args),
         }
     }
 
@@ -321,6 +343,7 @@ impl Expr {
             Expr::Logical { .. } => "logical",
             Expr::Break { .. } => "break",
             Expr::Continue { .. } => "continue",
+            Expr::Call { .. } => "call",
         }
     }
 }
@@ -357,13 +380,16 @@ pub enum Stmt {
 }
 
 impl Stmt {
-    pub fn accept<T>(&self, v: &mut dyn Visitor<T>) -> T {
+    pub fn accept<T, V>(&self, v: &mut V) -> T
+    where
+        V: Visitor<T>,
+    {
         match self {
             Stmt::Expression { expr } => v.visit_expression_statement(expr),
             Stmt::Print { expr } => v.visit_print_statement(expr),
             Stmt::Var { name, initializer } => v.visit_var_statement(name, initializer.as_ref()),
             Stmt::Block { statements } => v.visit_block_statement(statements),
-            Self::If {
+            Stmt::If {
                 condition,
                 if_block,
                 else_block,
@@ -372,7 +398,7 @@ impl Stmt {
                 if_block,
                 else_block.as_ref().map(|stmt| stmt.as_ref()),
             ),
-            Self::While { condition, block } => v.visit_while_statement(condition, block),
+            Stmt::While { condition, block } => v.visit_while_statement(condition, block),
         }
     }
 
