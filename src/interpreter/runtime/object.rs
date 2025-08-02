@@ -1,6 +1,6 @@
+use super::function::Function;
 use super::native::NativeFn;
 use super::primitive::Primitive;
-use super::scope::Scope;
 use crate::lang::tree::ast;
 use std::cell::RefCell;
 use std::fmt;
@@ -9,11 +9,7 @@ use std::rc::Rc;
 #[derive(Debug, Clone)]
 pub enum LoxObject {
     Primitive(Primitive),
-    Function {
-        closure: Rc<RefCell<Scope>>,
-        params: Vec<String>,
-        body: Rc<ast::Stmt>,
-    },
+    Function(Rc<Function>),
     Native(NativeFn),
 }
 

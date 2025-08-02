@@ -308,9 +308,6 @@ pub enum Expr {
         callee: Callee,
         args: Vec<Expr>,
     },
-
-    Break,
-    Continue,
 }
 
 impl Expr {
@@ -326,8 +323,6 @@ impl Expr {
             Expr::Variable { value } => v.visit_variable(value),
             Expr::Assignment { name, value } => v.visit_assignment(name, value),
             Expr::Logical { left, op, right } => v.visit_logical(left, *op, right),
-            Expr::Break => v.visit_break(),
-            Expr::Continue => v.visit_continue(),
             Expr::Call { callee, args } => v.visit_call(callee, args),
         }
     }
@@ -341,8 +336,6 @@ impl Expr {
             Expr::Variable { .. } => "var",
             Expr::Assignment { .. } => "assignment",
             Expr::Logical { .. } => "logical",
-            Expr::Break { .. } => "break",
-            Expr::Continue { .. } => "continue",
             Expr::Call { .. } => "call",
         }
     }
@@ -377,6 +370,18 @@ pub enum Stmt {
         condition: Expr,
         block: Box<Stmt>,
     },
+
+    Function {
+        name: Identifier,
+        params: Vec<Identifier>,
+        body: Rc<Stmt>,
+    },
+
+    Break,
+    Continue,
+    Return {
+        value: Option<Expr>,
+    },
 }
 
 impl Stmt {
@@ -385,11 +390,11 @@ impl Stmt {
         V: Visitor<T>,
     {
         match self {
-            Stmt::Expression { expr } => v.visit_expression_statement(expr),
-            Stmt::Print { expr } => v.visit_print_statement(expr),
-            Stmt::Var { name, initializer } => v.visit_var_statement(name, initializer.as_ref()),
-            Stmt::Block { statements } => v.visit_block_statement(statements),
-            Stmt::If {
+            Self::Expression { expr } => v.visit_expression_statement(expr),
+            Self::Print { expr } => v.visit_print_statement(expr),
+            Self::Var { name, initializer } => v.visit_var_statement(name, initializer.as_ref()),
+            Self::Block { statements } => v.visit_block_statement(statements),
+            Self::If {
                 condition,
                 if_block,
                 else_block,
@@ -398,7 +403,13 @@ impl Stmt {
                 if_block,
                 else_block.as_ref().map(|stmt| stmt.as_ref()),
             ),
-            Stmt::While { condition, block } => v.visit_while_statement(condition, block),
+            Self::While { condition, block } => v.visit_while_statement(condition, block),
+            Self::Function { name, params, body } => {
+                v.visit_function_statement(name, params, body.clone())
+            }
+            Self::Break => v.visit_break_statement(),
+            Self::Continue => v.visit_continue_statment(),
+            Self::Return { value } => v.visit_return_statment(value.as_ref()),
         }
     }
 
@@ -410,6 +421,10 @@ impl Stmt {
             Stmt::Block { .. } => "block",
             Self::If { .. } => "if",
             Self::While { .. } => "while",
+            Self::Function { .. } => "function",
+            Self::Break => "break",
+            Self::Continue => "continue",
+            Self::Return { .. } => "return",
         }
     }
 }

@@ -1,6 +1,7 @@
 use super::tree::ast::{
     BinaryOperator, Callee, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
 };
+use std::rc::Rc;
 
 pub trait Visitor<T> {
     // expressions
@@ -24,6 +25,13 @@ pub trait Visitor<T> {
         else_block: Option<&Stmt>,
     ) -> T;
     fn visit_while_statement(&mut self, condition: &Expr, block: &Stmt) -> T;
-    fn visit_break(&mut self) -> T;
-    fn visit_continue(&mut self) -> T;
+    fn visit_function_statement(
+        &mut self,
+        name: &Identifier,
+        params: &[Identifier],
+        body: Rc<Stmt>,
+    ) -> T;
+    fn visit_break_statement(&mut self) -> T;
+    fn visit_continue_statment(&mut self) -> T;
+    fn visit_return_statment(&mut self, value: Option<&Expr>) -> T;
 }

@@ -1,10 +1,12 @@
 use std::fmt;
 
+use crate::interpreter::runtime::object::LoxObject;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Control {
     Break,
     Continue,
-    // Return(Value) - saving this for when we implement functions :)
+    Return(LoxObject),
 }
 
 impl Control {
@@ -12,6 +14,18 @@ impl Control {
         match self {
             Self::Break => "break",
             Self::Continue => "continue",
+            Self::Return(_) => "return",
+        }
+    }
+
+    pub fn new_return(v: LoxObject) -> Self {
+        Self::Return(v)
+    }
+
+    pub fn is_return(&self) -> bool {
+        match self {
+            Self::Return(_) => true,
+            _ => false,
         }
     }
 
@@ -31,9 +45,10 @@ impl Control {
 }
 
 impl fmt::Display for Control {
-    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Break | Self::Continue => Ok(()),
+            Self::Return(v) => write!(f, "return({})", v),
         }
     }
 }

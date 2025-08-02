@@ -5,6 +5,7 @@ use crate::lang::tokenizer::token::{Token, TokenType};
 use crate::lang::tree::ast::{BinaryOperator, Callee, Identifier, Literal, Stmt};
 use crate::lang::view::View;
 use std::iter::{Iterator, Peekable};
+use std::rc::Rc;
 
 const MAX_FUNC_ARGS: usize = 255;
 
@@ -58,6 +59,18 @@ impl<'a> TokenStream<'a> {
         }
         Err(ParseError::UnexpectedEof)
     }
+
+    fn assert(&mut self, t: TokenType, msg: &'static str) -> Result<Token<'a>, ParseError> {
+        let token = self.next()?;
+        if token.token_type != t {
+            return Err(ParseError::UnexpectedToken {
+                expected: t,
+                recieved: token.token_type.to_string(),
+                msg,
+            });
+        }
+        Ok(token)
+    }
 }
 
 pub struct Parser<'a> {
@@ -65,6 +78,7 @@ pub struct Parser<'a> {
     statements: Vec<Stmt>,
     errors: Vec<ParseError>,
     loop_cnt: i8,
+    fn_cnt: i8,
 }
 
 impl<'a> Parser<'a> {
@@ -74,6 +88,7 @@ impl<'a> Parser<'a> {
             statements: Vec::with_capacity(1024),
             errors: Vec::with_capacity(1024),
             loop_cnt: 0,
+            fn_cnt: 0,
         }
     }
 
@@ -137,6 +152,14 @@ impl<'a> Parser<'a> {
             self.while_statement()
         } else if self.take_for() {
             self.for_statement()
+        } else if self.take_fun() {
+            self.fun_statement()
+        } else if self.next_is_break()? {
+            self.break_statement()
+        } else if self.next_is_continue()? {
+            self.continue_statement()
+        } else if self.next_is_return()? {
+            self.return_statement()
         } else {
             self.expression_statement()
         }
@@ -204,12 +227,67 @@ impl<'a> Parser<'a> {
         })
     }
 
+    fn fun_statement(&mut self) -> Result<Stmt, ParseError> {
+        self.enter_fn();
+        let name = self.tokens.assert(TokenType::Identifier, "function dec")?;
+        let _ = self.expect("function dec must open", TokenType::LeftParen)?;
+        let params = self.parameters()?;
+        self.expect("function must open to block scope", TokenType::LeftBrace)?;
+        let ret = Ok(Stmt::Function {
+            name: name.try_into()?,
+            params,
+            body: Rc::new(self.block_statement()?),
+        });
+        self.exit_fn();
+        ret
+    }
+
+    fn break_statement(&mut self) -> Result<Stmt, ParseError> {
+        let keyword = self.tokens.next()?;
+        if !self.is_in_loop() {
+            return Err(ParseError::InvalidLoopKeyword {
+                type_str: keyword.lexeme.to_string(),
+                location: keyword.pos,
+            });
+        }
+        self.expect("unterminated break statement", TokenType::Semicolon)?;
+        Ok(Stmt::Break)
+    }
+
+    fn continue_statement(&mut self) -> Result<Stmt, ParseError> {
+        let keyword = self.tokens.next()?;
+        if !self.is_in_loop() {
+            return Err(ParseError::InvalidLoopKeyword {
+                type_str: keyword.lexeme.to_string(),
+                location: keyword.pos,
+            });
+        }
+        self.expect("unterminated break statement", TokenType::Semicolon)?;
+        Ok(Stmt::Break)
+    }
+
+    fn return_statement(&mut self) -> Result<Stmt, ParseError> {
+        let keyword = self.tokens.next()?;
+        if !self.is_in_fn() {
+            return Err(ParseError::InvalidReturn {
+                location: keyword.pos,
+            });
+        }
+
+        let mut expr = None;
+        if !self.next_is_semicolon()? {
+            expr = Some(self.expression()?);
+        }
+        self.expect("unterminated return statement", TokenType::Semicolon)?;
+        Ok(Stmt::Return { value: expr })
+    }
+
     fn block_statement(&mut self) -> Result<Stmt, ParseError> {
-        let terminates = |t: &'_ Token<'_>| {
+        let not_terminated = |t: &'_ Token<'_>| {
             t.token_type != TokenType::RightBrace && t.token_type != TokenType::Eof
         };
         let mut statements = Vec::new();
-        while let Some(_) = self.tokens.peek_next_if(terminates)? {
+        while let Some(_) = self.tokens.peek_next_if(not_terminated)? {
             statements.push(self.declaration()?);
         }
         self.expect("unclosed block scope", TokenType::RightBrace)?;
@@ -390,6 +468,27 @@ impl<'a> Parser<'a> {
         Ok(args)
     }
 
+    fn parameters(&mut self) -> Result<Vec<Identifier>, ParseError> {
+        let mut params = Vec::with_capacity(MAX_FUNC_ARGS);
+        if self.take_right_parens() {
+            return Ok(params);
+        }
+        params.push(
+            self.tokens
+                .assert(TokenType::Identifier, "function dec")?
+                .try_into()?,
+        );
+        while self.take_comma() {
+            params.push(
+                self.tokens
+                    .assert(TokenType::Identifier, "function dec")?
+                    .try_into()?,
+            );
+        }
+        self.expect("function call did not terminate", TokenType::RightParen)?;
+        Ok(params)
+    }
+
     fn primary(&mut self) -> Result<Expr, ParseError> {
         if self.take_left_paren() {
             let expr = self.expression()?;
@@ -400,26 +499,6 @@ impl<'a> Parser<'a> {
             return Ok(Expr::Grouping {
                 expr: Box::new(expr),
             });
-        }
-
-        if let Some(t) = self.match_break() {
-            if !self.take_in_loop() {
-                return Err(ParseError::InvalidLoopKeyword {
-                    type_str: t.lexeme.to_string(),
-                    location: t.pos,
-                });
-            }
-            return Ok(Expr::Break);
-        }
-
-        if let Some(t) = self.match_continue() {
-            if !self.take_in_loop() {
-                return Err(ParseError::InvalidLoopKeyword {
-                    type_str: t.lexeme.to_string(),
-                    location: t.pos,
-                });
-            }
-            return Ok(Expr::Continue);
         }
 
         if let Some(name) = self.match_one(TokenType::Identifier) {
@@ -488,14 +567,6 @@ impl<'a> Parser<'a> {
         self.match_one(TokenType::Equal)
     }
 
-    fn match_break(&mut self) -> Option<Token<'a>> {
-        self.match_one(TokenType::Break)
-    }
-
-    fn match_continue(&mut self) -> Option<Token<'a>> {
-        self.match_one(TokenType::Continue)
-    }
-
     fn match_op_equal(&mut self) -> Option<Token<'a>> {
         self.match_many(&[
             TokenType::PlusEqual,
@@ -551,6 +622,38 @@ impl<'a> Parser<'a> {
         self.match_one(TokenType::RightParen).is_some()
     }
 
+    fn take_fun(&mut self) -> bool {
+        self.match_one(TokenType::Fun).is_some()
+    }
+
+    fn next_is_break(&mut self) -> Result<bool, ParseError> {
+        Ok(self
+            .tokens
+            .peek_next_if(|t| t.token_type == TokenType::Break)?
+            .is_some())
+    }
+
+    fn next_is_continue(&mut self) -> Result<bool, ParseError> {
+        Ok(self
+            .tokens
+            .peek_next_if(|t| t.token_type == TokenType::Continue)?
+            .is_some())
+    }
+
+    fn next_is_return(&mut self) -> Result<bool, ParseError> {
+        Ok(self
+            .tokens
+            .peek_next_if(|t| t.token_type == TokenType::Return)?
+            .is_some())
+    }
+
+    fn next_is_semicolon(&mut self) -> Result<bool, ParseError> {
+        Ok(self
+            .tokens
+            .peek_next_if(|t| t.token_type == TokenType::Semicolon)?
+            .is_some())
+    }
+
     fn expect(&mut self, msg: &'static str, t: TokenType) -> Result<Token<'a>, ParseError> {
         let toke = self.tokens.next()?;
         if toke.token_type != t {
@@ -574,16 +677,28 @@ impl<'a> Parser<'a> {
         true
     }
 
-    fn take_in_loop(&self) -> bool {
+    fn is_in_loop(&self) -> bool {
         self.loop_cnt > 0
+    }
+
+    fn is_in_fn(&self) -> bool {
+        self.fn_cnt > 0
     }
 
     fn enter_loop(&mut self) {
         self.loop_cnt += 1;
     }
 
+    fn enter_fn(&mut self) {
+        self.fn_cnt += 1;
+    }
+
     fn exit_loop(&mut self) {
         self.loop_cnt -= 1;
+    }
+
+    fn exit_fn(&mut self) {
+        self.fn_cnt -= 1;
     }
 
     /// recover from a panic state by reading through until we hit the end of the stream, or alternatively a semi-colon terminator.

@@ -1,5 +1,54 @@
+use std::io::Error;
+
 use crate::lang::view::View;
 use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum RuntimeError {
+    #[error("{reason} {place}")]
+    WithLocation {
+        #[source]
+        reason: LoxError,
+        place: View,
+    },
+    #[error("{reason}")]
+    Without {
+        #[from]
+        #[source]
+        reason: LoxError,
+    },
+}
+
+impl RuntimeError {
+    pub fn with_place(self, place: View) -> Self {
+        match self {
+            Self::WithLocation { .. } => self, // you cannot mutate the location originally attached to it.
+            Self::Without { reason } => Self::WithLocation { reason, place },
+        }
+    }
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum LoxError {
+    #[error("TypeError: {0}")]
+    TypeError(String),
+    #[error("ReferenceError: {0}")]
+    ReferenceError(String),
+    #[error(transparent)]
+    NativeError(#[from] NativeError),
+    #[error("DebugError: {0}")]
+    DebugError(&'static str),
+    #[error("TypeError: {0}")]
+    EvalUnwrapError(String),
+    #[error("Uncaught SyntaxError: {0}")]
+    UncaughtSyntaxError(String),
+}
+
+#[derive(Error, Debug, Clone)]
+pub enum NativeError {
+    #[error("NativeError {0}")]
+    SystemError(String),
+}
 
 // this is purly for routing logic to understand why something failed.
 // It is not intended to be printed directly.
@@ -9,22 +58,4 @@ pub enum BinaryError {
     RightSide,
     InvalidOperator,
     InvalidTypes,
-}
-
-#[derive(Error, Debug, Clone)]
-pub enum LoxError {
-    #[error("TypeError: {msg} {view}")]
-    TypeError { msg: String, view: View },
-    #[error("ReferenceError: {name} is undefined {view}")]
-    ReferenceError { name: String, view: View },
-    #[error("NativeError: {0}")]
-    NativeError(#[from] NativeError),
-    #[error("DebugError: {0}")]
-    DebugError(&'static str),
-}
-
-#[derive(Error, Debug, Clone)]
-pub enum NativeError {
-    #[error("{0}")]
-    SystemError(String),
 }

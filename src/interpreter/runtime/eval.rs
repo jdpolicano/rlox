@@ -1,9 +1,10 @@
 use super::control::Control;
 use super::error::LoxError;
+use super::error::RuntimeError;
 use super::object::LoxObject;
 use std::fmt;
 
-pub type EvalResult = Result<Eval, LoxError>;
+pub type EvalResult = Result<Eval, RuntimeError>;
 
 #[derive(Debug, Clone)]
 pub enum Eval {
@@ -53,6 +54,13 @@ impl Eval {
         }
     }
 
+    pub fn is_return(&self) -> bool {
+        match self {
+            Self::Ctrl(ctrl) => ctrl.is_return(),
+            _ => false,
+        }
+    }
+
     pub fn is_control(&self) -> bool {
         match self {
             Self::Ctrl(_) => true,
@@ -79,6 +87,10 @@ impl Eval {
         Self::Ctrl(Control::Break)
     }
 
+    pub fn new_return(v: LoxObject) -> Self {
+        Self::Ctrl(Control::new_return(v))
+    }
+
     pub fn type_str(&self) -> &str {
         match self {
             Self::Ctrl(ctrl) => ctrl.type_str(),
@@ -86,12 +98,10 @@ impl Eval {
         }
     }
 
-    pub fn unwrap_to_obj(&self) -> Result<LoxObject, LoxError> {
+    pub fn unwrap_return(self) -> Self {
         match self {
-            Self::Ctrl(ctrl) => {
-                let msg = format!("")
-            },
-            Self::Object(obj) => obj.type_str(),
+            Self::Ctrl(Control::Return(v)) => Self::Object(v),
+            _ => self,
         }
     }
 
@@ -103,21 +113,5 @@ impl Eval {
             Self::Ctrl(_) => None,
             Self::Object(obj) => Some(f(obj)),
         }
-    }
-}
-
-fn type_error(ctx: &str, type_str: &str, view: View) -> LoxError {
-    let msg = if ctx.len() > 0 {
-        format!("unexpected type '{}' {}", type_str, ctx)
-    } else {
-        format!("unexpected type '{}'", type_str)
-    };
-    LoxError::TypeError { msg, view }
-}
-
-fn unwrap_to_type_error(ctx: &str, eval: Eval, view: View) -> Result<LoxObject, LoxError> {
-    match eval {
-        Eval::Object(obj) => Ok(obj),
-        Eval::Ctrl(ctrl) => Err(type_error(ctx, ctrl.type_str(), view)),
     }
 }

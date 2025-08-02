@@ -36,6 +36,8 @@ pub enum ParseError {
     UnexpectedAssignment { type_str: String, location: View },
     #[error("SyntaxError: cannot use '{type_str}' out side of a loop {location}")]
     InvalidLoopKeyword { type_str: String, location: View },
+    #[error("SyntaxError: cannot use 'return' out side of a function {location}")]
+    InvalidReturn { location: View },
     #[error("SyntaxError: function arguments cannot exceed {location}")]
     FuncExceedMaxArgs { max: usize, location: View },
     #[error("SyntaxError: unexpected end of file")]

@@ -19,6 +19,10 @@ impl Scope {
         }
     }
 
+    pub fn size(&self) -> usize {
+        self.map.len()
+    }
+
     pub fn get(&self, name: &str) -> Option<LoxObject> {
         if let Some(v) = self.map.get(name) {
             return Some(v.clone());
@@ -50,7 +54,7 @@ impl Scope {
         self.parent.as_ref().map(|p| p.clone().into())
     }
 
-    pub fn has(&self, key: &str) -> bool {
+    pub fn has_local(&self, key: &str) -> bool {
         self.map.contains_key(key)
     }
 
@@ -61,6 +65,10 @@ impl Scope {
     pub fn with_parent(mut self, parent: Rc<RefCell<Scope>>) -> Self {
         self.parent = Some(parent);
         self
+    }
+
+    pub fn delete(&mut self, key: &str) {
+        self.map.remove(key);
     }
 }
 

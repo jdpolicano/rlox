@@ -1,18 +1,15 @@
-use crate::interpreter::runtime::error::{BinaryError, LoxError};
+use crate::interpreter::runtime::error::{BinaryError, LoxError, RuntimeError};
 use crate::interpreter::runtime::eval::{Eval, EvalResult};
+use crate::interpreter::runtime::function::Function;
 use crate::interpreter::runtime::native::setup_native;
 use crate::interpreter::runtime::object::LoxObject;
 use crate::interpreter::runtime::scope::Scope;
 use crate::lang::tree::ast::{
     BinaryOperator, Callee, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
 };
-use crate::lang::view::View;
 use crate::lang::visitor::Visitor;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-// todo: implement lox errors. Should they just be a type of runtime value or should we simply use a result?
-type LoxResult = Result<LoxObject, LoxError>;
 
 pub struct Lox {
     current_scope: Rc<RefCell<Scope>>,
@@ -27,19 +24,35 @@ impl Lox {
         me
     }
 
-    pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), LoxError> {
+    pub fn interpret(&mut self, statements: Vec<Stmt>) -> Result<(), RuntimeError> {
         for stmt in statements {
             let _ = stmt.accept(self)?;
         }
         Ok(())
     }
 
-    pub fn create_scope(&mut self) {
+    fn scope_size(&self) -> usize {
+        self.current_scope.borrow().size()
+    }
+
+    fn has_local(&self, key: &str) -> bool {
+        self.current_scope.borrow().has_local(key)
+    }
+
+    fn scope_parent(&self) -> Option<Rc<RefCell<Scope>>> {
+        self.current_scope.borrow().parent()
+    }
+
+    fn scope_now(&self) -> Rc<RefCell<Scope>> {
+        self.current_scope.clone()
+    }
+
+    fn create_scope(&mut self) {
         let next = Scope::default().with_parent(self.current_scope.clone());
         self.current_scope = Rc::new(RefCell::new(next));
     }
 
-    pub fn shed_scope(&mut self) {
+    fn shed_scope(&mut self) {
         let parent = self.current_scope.borrow().parent();
         if let Some(p) = parent {
             self.current_scope = p
@@ -57,12 +70,44 @@ impl Lox {
     pub fn bind(&mut self, key: &str, value: LoxObject) -> Option<LoxObject> {
         self.current_scope.borrow_mut().set(key, value)
     }
+
+    fn call_fn(&mut self, func: &Function, args: Vec<LoxObject>) -> EvalResult {
+        // cache the current execution context.
+        let original = self.current_scope.clone();
+        // set our exec context to the closure captured by the fn.
+        self.current_scope = func.closure();
+        // setup a fresh environment for the parameters to be bound to the arguments.
+        self.create_scope();
+        // setup the stack local arguments.
+        self.setup_fn_stack(func, args);
+        // call the function
+        let eval = func.body().accept(self);
+        // return to original state
+        self.current_scope = original;
+        eval
+    }
+
+    // it is the responsibliity of the caller to have properly set up the state
+    // for local variables.
+    fn setup_fn_stack(&mut self, func: &Function, mut args: Vec<LoxObject>) {
+        let params = func.params();
+        if params.len() == 0 {
+            return;
+        }
+        while args.len() < params.len() {
+            args.push(LoxObject::new_nil());
+        }
+        let pairs = params.iter().zip(args.into_iter());
+        for (name, value) in pairs {
+            self.bind_local(name, value);
+        }
+    }
 }
 
 impl Visitor<EvalResult> for Lox {
     fn visit_binary(&mut self, left: &Expr, op: BinaryOperator, right: &Expr) -> EvalResult {
-        let l = unwrap_to_type_error("binary", left.accept(self)?, op.view())?;
-        let r = unwrap_to_type_error("binary", right.accept(self)?, op.view())?;
+        let l = unwrap_to_object(left.accept(self)?).map_err(|e| e.with_place(op.view()))?;
+        let r = unwrap_to_object(right.accept(self)?).map_err(|e| e.with_place(op.view()))?;
         match binary_op(&l, &r, op) {
             Ok(v) => Ok(v.into()),
             Err(err_type) => Err(binary_op_error(&l, &r, op, err_type)),
@@ -96,7 +141,7 @@ impl Visitor<EvalResult> for Lox {
 
     fn visit_unary(&mut self, prefix: UnaryPrefix, expr: &Expr) -> EvalResult {
         let eval = expr.accept(self)?;
-        let value = unwrap_to_type_error("unary", eval, prefix.view())?;
+        let value = unwrap_to_object(eval).map_err(|e| e.with_place(prefix.view()))?;
         match unary_op(&value, prefix) {
             Ok(v) => Ok(v.into()),
             Err(_) => Err(unary_prefix_error(&value, prefix)),
@@ -113,35 +158,50 @@ impl Visitor<EvalResult> for Lox {
 
     fn visit_assignment(&mut self, ident: &Identifier, value: &Expr) -> EvalResult {
         let eval = value.accept(self)?;
-        let value = unwrap_to_type_error("assignment", eval, ident.view())?;
+        let value = unwrap_to_object(eval).map_err(|e| e.with_place(ident.view()))?;
         if let Some(_) = self.bind(ident.name_str(), value.clone()) {
             return Ok(value.into());
         };
         Err(reference_error(ident))
     }
 
-    fn visit_break(&mut self) -> EvalResult {
+    fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> EvalResult {
+        let result = callee.expr.accept(self)?;
+        let call_obj = unwrap_to_object(result).map_err(|e| e.with_place(callee.view()))?;
+        let mut rt_args = Vec::with_capacity(args.len());
+        for arg in args {
+            let eval = arg.accept(self)?;
+            let obj = unwrap_to_object(eval).map_err(|e| e.with_place(callee.view()))?;
+            rt_args.push(obj)
+        }
+        match call_obj {
+            LoxObject::Native(f) => f(self, rt_args).map_err(|e| e.with_place(callee.view())),
+            LoxObject::Function(f) => self
+                .call_fn(f.as_ref(), rt_args)
+                .map(|v| v.unwrap_return())
+                .map_err(|e| e.with_place(callee.view())),
+            _ => Err(
+                RuntimeError::from(LoxError::DebugError("this shouldn't be reachable"))
+                    .with_place(callee.view()),
+            ),
+        }
+    }
+
+    fn visit_break_statement(&mut self) -> EvalResult {
         Ok(Eval::new_break())
     }
 
-    fn visit_continue(&mut self) -> EvalResult {
+    fn visit_continue_statment(&mut self) -> EvalResult {
         Ok(Eval::new_continue().into())
     }
 
-    fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> EvalResult {
-        let result = callee.expr.accept(self)?;
-        let call_obj = unwrap_to_type_error("callee", result, callee.view())?;
-        match call_obj {
-            LoxObject::Native(f) => {
-                let mut rt_args = Vec::with_capacity(args.len());
-                for arg in args {
-                    rt_args.push(arg.accept(self)?)
-                }
-                let v = f(self, &rt_args)?;
-                Ok(v.into())
-            }
-            _ => Err(LoxError::DebugError("this shouldn't be reachable")),
+    fn visit_return_statment(&mut self, value: Option<&Expr>) -> EvalResult {
+        if let Some(v) = value {
+            let eval = v.accept(self)?;
+            let obj = unwrap_to_object(eval)?;
+            return Ok(Eval::new_return(obj));
         }
+        Ok(Eval::new_return(LoxObject::new_nil()))
     }
 
     fn visit_expression_statement(&mut self, expr: &Expr) -> EvalResult {
@@ -155,6 +215,14 @@ impl Visitor<EvalResult> for Lox {
     }
 
     fn visit_var_statement(&mut self, ident: &Identifier, expr: Option<&Expr>) -> EvalResult {
+        if self.has_local(ident.name_str()) {
+            let msg = format!(
+                "identifier '{}' has already been declared",
+                ident.name_str()
+            );
+            let err = LoxError::UncaughtSyntaxError(msg);
+            return Err(RuntimeError::from(err).with_place(ident.view()));
+        }
         let value = expr
             .map(|e| e.accept(self))
             .unwrap_or(Ok(Eval::new_nil()))?;
@@ -163,7 +231,7 @@ impl Visitor<EvalResult> for Lox {
                 self.bind_local(ident.name_str(), obj);
                 Ok(Eval::new_nil())
             }
-            _ => Err(type_error("", value.type_str(), ident.view())),
+            _ => Err(type_error("object", value.type_str()).with_place(ident.view())),
         }
     }
 
@@ -180,7 +248,7 @@ impl Visitor<EvalResult> for Lox {
         }
         // get rid of the temporary scope we created.
         self.shed_scope();
-        Ok(Eval::from(ret))
+        Ok(ret)
     }
 
     fn visit_if_statement(
@@ -204,8 +272,29 @@ impl Visitor<EvalResult> for Lox {
             if v.is_break() {
                 break;
             }
+            if v.is_return() {
+                return Ok(v);
+            }
         }
         Ok(LoxObject::new_nil().into())
+    }
+
+    fn visit_function_statement(
+        &mut self,
+        name: &Identifier,
+        params: &[Identifier],
+        body: Rc<Stmt>,
+    ) -> EvalResult {
+        let closure = self.scope_now();
+        let params: Vec<String> = params
+            .iter()
+            .map(|ident| ident.name_str().to_string())
+            .collect();
+        let body = body.clone();
+        let function = Rc::new(Function::new(closure, params, body));
+        self.bind_local(name.name_str(), LoxObject::Function(function.clone()));
+        self.create_scope();
+        Ok(LoxObject::Function(function).into())
     }
 }
 
@@ -290,7 +379,7 @@ fn binary_op_error(
     r: &LoxObject,
     op: BinaryOperator,
     err_type: BinaryError,
-) -> LoxError {
+) -> RuntimeError {
     let msg = match err_type {
         BinaryError::LeftSide => format!(
             "lefthand side incorrect type '{}' for op {}",
@@ -306,39 +395,30 @@ fn binary_op_error(
         _ => format!("cannot add '{}' + {}'", l.type_str(), r.type_str()),
     };
 
-    LoxError::TypeError {
-        msg,
-        view: op.view(),
-    }
+    RuntimeError::from(LoxError::TypeError(msg)).with_place(op.view())
 }
 
-fn unary_prefix_error(l: &LoxObject, prefix: UnaryPrefix) -> LoxError {
+fn unary_prefix_error(l: &LoxObject, prefix: UnaryPrefix) -> RuntimeError {
     let msg = format!("invalid type {} for prefix {}", l.type_str(), prefix);
-    LoxError::TypeError {
-        msg,
-        view: prefix.view(),
-    }
+    RuntimeError::from(LoxError::TypeError(msg)).with_place(prefix.view())
 }
 
-fn reference_error(ident: &Identifier) -> LoxError {
-    LoxError::ReferenceError {
-        name: ident.name_str().to_string(),
-        view: ident.view(),
-    }
+fn reference_error(ident: &Identifier) -> RuntimeError {
+    let msg = format!("undeclared identifier '{}'", ident.name_str());
+    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.view())
 }
 
-fn type_error(ctx: &str, type_str: &str, view: View) -> LoxError {
-    let msg = if ctx.len() > 0 {
-        format!("unexpected type '{}' {}", type_str, ctx)
-    } else {
-        format!("unexpected type '{}'", type_str)
-    };
-    LoxError::TypeError { msg, view }
+fn type_error(expected: &str, recieved: &str) -> RuntimeError {
+    LoxError::TypeError(format!(
+        "expected type '{}' but recieved {}",
+        expected, recieved
+    ))
+    .into()
 }
 
-fn unwrap_to_type_error(ctx: &str, eval: Eval, view: View) -> Result<LoxObject, LoxError> {
+fn unwrap_to_object(eval: Eval) -> Result<LoxObject, RuntimeError> {
     match eval {
         Eval::Object(obj) => Ok(obj),
-        Eval::Ctrl(ctrl) => Err(type_error(ctx, ctrl.type_str(), view)),
+        _ => Err(type_error("object", eval.type_str())),
     }
 }
