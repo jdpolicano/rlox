@@ -2,7 +2,7 @@ use super::ast::Expr;
 use super::error::ParseError;
 use crate::lang::tokenizer::scanner::Scanner;
 use crate::lang::tokenizer::token::{Token, TokenType};
-use crate::lang::tree::ast::{BinaryOperator, Callee, Identifier, Literal, Stmt};
+use crate::lang::tree::ast::{BinaryOperator, Callee, Function, Identifier, Literal, Stmt};
 use crate::lang::view::View;
 use std::iter::{Iterator, Peekable};
 use std::rc::Rc;
@@ -152,7 +152,7 @@ impl<'a> Parser<'a> {
             self.while_statement()
         } else if self.take_for() {
             self.for_statement()
-        } else if self.take_fun() {
+        } else if self.next_is_fun()? {
             self.fun_statement()
         } else if self.next_is_break()? {
             self.break_statement()
@@ -228,18 +228,14 @@ impl<'a> Parser<'a> {
     }
 
     fn fun_statement(&mut self) -> Result<Stmt, ParseError> {
-        self.enter_fn();
-        let name = self.tokens.assert(TokenType::Identifier, "function dec")?;
-        let _ = self.expect("function dec must open", TokenType::LeftParen)?;
-        let params = self.parameters()?;
-        self.expect("function must open to block scope", TokenType::LeftBrace)?;
-        let ret = Ok(Stmt::Function {
-            name: name.try_into()?,
-            params,
-            body: Rc::new(self.block_statement()?),
-        });
-        self.exit_fn();
-        ret
+        let error_loc = self.tokens.peek().unwrap()?.pos.clone();
+        let func_expr = self.expression()?;
+        match func_expr {
+            Expr::Function { value } => Ok(desugar_function_statement(value)),
+            _ => Err(ParseError::InvalidFuncStatement {
+                location: error_loc,
+            }),
+        }
     }
 
     fn break_statement(&mut self) -> Result<Stmt, ParseError> {
@@ -276,7 +272,15 @@ impl<'a> Parser<'a> {
 
         let mut expr = None;
         if !self.next_is_semicolon()? {
-            expr = Some(self.expression()?);
+            let ret_value = self.expression()?;
+            match ret_value {
+                Expr::Function { .. } => {
+                    return Ok(Stmt::Return {
+                        value: Some(ret_value),
+                    });
+                }
+                _ => expr = Some(ret_value),
+            }
         }
         self.expect("unterminated return statement", TokenType::Semicolon)?;
         Ok(Stmt::Return { value: expr })
@@ -485,7 +489,7 @@ impl<'a> Parser<'a> {
                     .try_into()?,
             );
         }
-        self.expect("function call did not terminate", TokenType::RightParen)?;
+        self.expect("function params did not terminate", TokenType::RightParen)?;
         Ok(params)
     }
 
@@ -501,7 +505,11 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if let Some(name) = self.match_one(TokenType::Identifier) {
+        if let Some(t) = self.match_fun() {
+            return self.fun_expression(t);
+        }
+
+        if let Some(name) = self.match_ident() {
             return Ok(Expr::Variable {
                 value: name.try_into()?,
             });
@@ -510,6 +518,26 @@ impl<'a> Parser<'a> {
         let next_tok = self.tokens.next()?;
         let value = next_tok.try_into()?;
         Ok(Expr::Literal { value })
+    }
+
+    fn fun_expression(&mut self, fun_keyword: Token<'a>) -> Result<Expr, ParseError> {
+        self.enter_fn();
+        // if the function is anonymous then there will be no identifier after it.
+        let (name, is_anonymous) = if let Some(t) = self.match_ident() {
+            (Identifier::try_from(t)?, false)
+        } else {
+            (Identifier::try_from(fun_keyword)?, true)
+        };
+        // regardless of the above point, it must be followed by some params
+        let _ = self.expect("function dec must open", TokenType::LeftParen)?;
+        let params = self.parameters()?;
+        // functions are required to be followed by a block scope, so we force this by doing a little look-ahead.
+        self.expect("function must open to block scope", TokenType::LeftBrace)?;
+        let ret = Ok(Expr::Function {
+            value: Function::new(is_anonymous, name, params, Rc::new(self.block_statement()?)),
+        });
+        self.exit_fn();
+        ret
     }
 
     fn match_one(&mut self, t: TokenType) -> Option<Token<'a>> {
@@ -574,6 +602,14 @@ impl<'a> Parser<'a> {
             TokenType::StarEqual,
             TokenType::SlashEqual,
         ])
+    }
+
+    fn match_ident(&mut self) -> Option<Token<'a>> {
+        self.match_one(TokenType::Identifier)
+    }
+
+    fn match_fun(&mut self) -> Option<Token<'a>> {
+        self.match_one(TokenType::Fun)
     }
 
     // the semantics for take_<x> statments is that it returns a bool and throws the token away.
@@ -644,6 +680,13 @@ impl<'a> Parser<'a> {
         Ok(self
             .tokens
             .peek_next_if(|t| t.token_type == TokenType::Return)?
+            .is_some())
+    }
+
+    fn next_is_fun(&mut self) -> Result<bool, ParseError> {
+        Ok(self
+            .tokens
+            .peek_next_if(|t| t.token_type == TokenType::Fun)?
             .is_some())
     }
 
@@ -759,6 +802,19 @@ fn desugar_for_statement(
     Ok(Stmt::Block {
         statements: outer_block,
     })
+}
+
+fn desugar_function_statement(value: Function) -> Stmt {
+    if value.is_anonymous() {
+        return Stmt::Expression {
+            expr: Expr::Function { value },
+        };
+    } else {
+        return Stmt::Var {
+            name: value.name(),
+            initializer: Some(Expr::Function { value }),
+        };
+    }
 }
 
 fn make_expression_statment(expr: Expr) -> Stmt {

@@ -23,15 +23,15 @@ impl Function {
         self.body.as_ref()
     }
 
-    pub fn closure(&self) -> Rc<RefCell<Scope>> {
-        self.closure.clone()
-    }
-
     pub fn arity(&self) -> usize {
         self.params.len()
     }
 
     pub fn params(&self) -> &[String] {
         &self.params[..]
+    }
+
+    pub fn closure(&self) -> Rc<RefCell<Scope>> {
+        self.closure.clone()
     }
 }

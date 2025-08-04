@@ -3,9 +3,9 @@ use crate::lang::native::Native;
 use crate::lang::tokenizer::token::{Token, TokenType};
 use crate::lang::view::View;
 use crate::lang::visitor::Visitor;
+use std::cell::Cell;
 use std::fmt;
 use std::rc::Rc;
-
 // "==" | "!=" | "<" | "<=" | ">" | ">=" |
 // "+"  | "-"  | "*" | "/" ;
 #[derive(Debug, Clone, Copy)]
@@ -224,6 +224,8 @@ impl fmt::Display for Literal {
 #[derive(Debug, Clone)]
 pub struct Identifier {
     name: String,
+    slot: Cell<Option<usize>>,
+    depth: Cell<Option<usize>>,
     view: View,
 }
 
@@ -235,11 +237,35 @@ impl Identifier {
     pub fn view(&self) -> View {
         self.view
     }
+
+    pub fn swap_depth(&self, value: usize) {
+        self.depth.replace(Some(value));
+    }
+
+    pub fn swap_slot(&self, value: usize) {
+        self.slot.replace(Some(value));
+    }
+
+    pub fn is_global(&self) -> bool {
+        self.slot.get().is_none() || self.depth.get().is_none()
+    }
+
+    pub fn depth_slot(&self) -> Option<(usize, usize)> {
+        // if self.name_str() == "count" {
+        //     println!("printing self to get depth slot -> {:#?}", self);
+        // }
+        if let Some(depth) = self.depth.get() {
+            if let Some(slot) = self.slot.get() {
+                return Some((depth, slot));
+            }
+        }
+        None
+    }
 }
 
 impl fmt::Display for Identifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "'{}'", self.name)
+        write!(f, "{}", self.name)
     }
 }
 
@@ -247,9 +273,14 @@ impl TryFrom<Token<'_>> for Identifier {
     type Error = ConversionError;
     fn try_from(value: Token<'_>) -> Result<Self, Self::Error> {
         match value.token_type {
-            TokenType::Identifier => Ok(Self {
+            // you can convert a fun to an identifier because
+            // we support anonymous functions whose name essentially becomes the
+            // location where it was declared.
+            TokenType::Identifier | TokenType::Fun => Ok(Self {
                 name: value.lexeme.to_string(),
                 view: value.pos,
+                slot: Cell::new(None),
+                depth: Cell::new(None),
             }),
             _ => Err(ConversionError::InvalidIdentifier(value.into())),
         }
@@ -265,6 +296,50 @@ pub struct Callee {
 impl Callee {
     pub fn view(&self) -> View {
         self.view
+    }
+}
+
+#[derive(Debug)]
+pub struct Function {
+    is_anonymous: bool,
+    name: Identifier,
+    params: Vec<Identifier>,
+    body: Rc<Stmt>,
+}
+
+impl Function {
+    pub fn view(&self) -> View {
+        self.name.view()
+    }
+
+    pub fn is_anonymous(&self) -> bool {
+        self.is_anonymous
+    }
+
+    pub fn params(&self) -> &[Identifier] {
+        &self.params[..]
+    }
+
+    pub fn body(&self) -> Rc<Stmt> {
+        self.body.clone()
+    }
+
+    pub fn name(&self) -> Identifier {
+        self.name.clone()
+    }
+
+    pub fn new(
+        is_anonymous: bool,
+        name: Identifier,
+        params: Vec<Identifier>,
+        body: Rc<Stmt>,
+    ) -> Self {
+        Self {
+            is_anonymous,
+            name,
+            params,
+            body,
+        }
     }
 }
 
@@ -308,12 +383,16 @@ pub enum Expr {
         callee: Callee,
         args: Vec<Expr>,
     },
+
+    Function {
+        value: Function,
+    },
 }
 
 impl Expr {
     pub fn accept<T, V>(&self, v: &mut V) -> T
     where
-        V: Visitor<T>,
+        V: Visitor<T, Expr, Stmt>,
     {
         match self {
             Expr::Binary { left, op, right } => v.visit_binary(left, *op, right),
@@ -324,6 +403,7 @@ impl Expr {
             Expr::Assignment { name, value } => v.visit_assignment(name, value),
             Expr::Logical { left, op, right } => v.visit_logical(left, *op, right),
             Expr::Call { callee, args } => v.visit_call(callee, args),
+            Expr::Function { value } => v.visit_function(value),
         }
     }
 
@@ -337,6 +417,7 @@ impl Expr {
             Expr::Assignment { .. } => "assignment",
             Expr::Logical { .. } => "logical",
             Expr::Call { .. } => "call",
+            Expr::Function { .. } => "function expression",
         }
     }
 }
@@ -371,12 +452,6 @@ pub enum Stmt {
         block: Box<Stmt>,
     },
 
-    Function {
-        name: Identifier,
-        params: Vec<Identifier>,
-        body: Rc<Stmt>,
-    },
-
     Break,
     Continue,
     Return {
@@ -387,7 +462,7 @@ pub enum Stmt {
 impl Stmt {
     pub fn accept<T, V>(&self, v: &mut V) -> T
     where
-        V: Visitor<T>,
+        V: Visitor<T, Expr, Stmt>,
     {
         match self {
             Self::Expression { expr } => v.visit_expression_statement(expr),
@@ -404,9 +479,7 @@ impl Stmt {
                 else_block.as_ref().map(|stmt| stmt.as_ref()),
             ),
             Self::While { condition, block } => v.visit_while_statement(condition, block),
-            Self::Function { name, params, body } => {
-                v.visit_function_statement(name, params, body.clone())
-            }
+
             Self::Break => v.visit_break_statement(),
             Self::Continue => v.visit_continue_statment(),
             Self::Return { value } => v.visit_return_statment(value.as_ref()),
@@ -421,7 +494,6 @@ impl Stmt {
             Stmt::Block { .. } => "block",
             Self::If { .. } => "if",
             Self::While { .. } => "while",
-            Self::Function { .. } => "function",
             Self::Break => "break",
             Self::Continue => "continue",
             Self::Return { .. } => "return",

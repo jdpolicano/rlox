@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub type NativeFn = fn(&mut Lox, Vec<LoxObject>) -> Result<Eval, RuntimeError>;
 
 pub fn setup_native(runtime: &mut Lox) {
-    runtime.bind_local("clock", lox_native_object(clock));
+    runtime.set_global("clock", LoxObject::Native(clock));
 }
 
 pub fn clock(_: &mut Lox, _: Vec<LoxObject>) -> Result<Eval, RuntimeError> {
@@ -21,8 +21,4 @@ pub fn clock(_: &mut Lox, _: Vec<LoxObject>) -> Result<Eval, RuntimeError> {
             Err(RuntimeError::from(LoxError::from(inner)))
         }
     }
-}
-
-fn lox_native_object(func: NativeFn) -> LoxObject {
-    LoxObject::Native(func)
 }

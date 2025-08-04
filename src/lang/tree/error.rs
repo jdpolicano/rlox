@@ -40,6 +40,8 @@ pub enum ParseError {
     InvalidReturn { location: View },
     #[error("SyntaxError: function arguments cannot exceed {location}")]
     FuncExceedMaxArgs { max: usize, location: View },
+    #[error("SyntaxError: function statment must be followed by a function {location}")]
+    InvalidFuncStatement { location: View },
     #[error("SyntaxError: unexpected end of file")]
     UnexpectedEof,
 }

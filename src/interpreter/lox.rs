@@ -5,19 +5,22 @@ use crate::interpreter::runtime::native::setup_native;
 use crate::interpreter::runtime::object::LoxObject;
 use crate::interpreter::runtime::scope::Scope;
 use crate::lang::tree::ast::{
-    BinaryOperator, Callee, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
+    self, BinaryOperator, Callee, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
 };
 use crate::lang::visitor::Visitor;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub struct Lox {
+    globals: HashMap<String, LoxObject>,
     current_scope: Rc<RefCell<Scope>>,
 }
 
 impl Lox {
     pub fn new() -> Self {
         let mut me = Self {
+            globals: HashMap::new(),
             current_scope: Rc::new(RefCell::new(Scope::default())),
         };
         setup_native(&mut me);
@@ -31,24 +34,42 @@ impl Lox {
         Ok(())
     }
 
-    fn scope_size(&self) -> usize {
-        self.current_scope.borrow().size()
+    fn declare(&mut self, name: &str) -> usize {
+        self.current_scope.borrow_mut().declare(name)
     }
 
-    fn has_local(&self, key: &str) -> bool {
-        self.current_scope.borrow().has_local(key)
+    fn define(&mut self, name: &str, value: LoxObject) {
+        self.current_scope.borrow_mut().define(name, value);
     }
 
-    fn scope_parent(&self) -> Option<Rc<RefCell<Scope>>> {
-        self.current_scope.borrow().parent()
+    fn set_at(&mut self, distance: usize, slot: usize, value: LoxObject) {
+        self.current_scope
+            .borrow_mut()
+            .set_at(distance, slot, value);
     }
 
-    fn scope_now(&self) -> Rc<RefCell<Scope>> {
-        self.current_scope.clone()
+    fn get_at(&self, distance: usize, slot: usize) -> LoxObject {
+        self.current_scope.borrow().get_at(distance, slot)
+    }
+
+    pub fn get_global(&self, name: &str) -> Option<LoxObject> {
+        self.globals.get(name).map(|v| v.clone())
+    }
+
+    pub fn set_global(&mut self, name: &str, value: LoxObject) {
+        self.globals.insert(name.to_string(), value);
+    }
+
+    pub fn resolve(&self, name: &Identifier) -> Option<LoxObject> {
+        if let Some((depth, slot)) = name.depth_slot() {
+            Some(self.get_at(depth, slot))
+        } else {
+            self.get_global(name.name_str())
+        }
     }
 
     fn create_scope(&mut self) {
-        let next = Scope::default().with_parent(self.current_scope.clone());
+        let next = Scope::from(self.current_scope.clone());
         self.current_scope = Rc::new(RefCell::new(next));
     }
 
@@ -59,22 +80,10 @@ impl Lox {
         }
     }
 
-    pub fn resolve(&self, key: &str) -> Option<LoxObject> {
-        self.current_scope.borrow().get(key)
-    }
-
-    pub fn bind_local(&mut self, key: &str, value: LoxObject) -> Option<LoxObject> {
-        self.current_scope.borrow_mut().set_local(key, value)
-    }
-
-    pub fn bind(&mut self, key: &str, value: LoxObject) -> Option<LoxObject> {
-        self.current_scope.borrow_mut().set(key, value)
-    }
-
     fn call_fn(&mut self, func: &Function, args: Vec<LoxObject>) -> EvalResult {
-        // cache the current execution context.
+        // copy our current scope.
         let original = self.current_scope.clone();
-        // set our exec context to the closure captured by the fn.
+        // setup the environment for the func's enclosing scope.
         self.current_scope = func.closure();
         // setup a fresh environment for the parameters to be bound to the arguments.
         self.create_scope();
@@ -82,29 +91,32 @@ impl Lox {
         self.setup_fn_stack(func, args);
         // call the function
         let eval = func.body().accept(self);
-        // return to original state
+        // peel off the parameter's scope
+        self.shed_scope();
+        //println!("scope after calling func \n{:#?}", self.current_scope);
+        // return to our original state.
         self.current_scope = original;
         eval
     }
 
     // it is the responsibliity of the caller to have properly set up the state
     // for local variables.
-    fn setup_fn_stack(&mut self, func: &Function, mut args: Vec<LoxObject>) {
+    fn setup_fn_stack(&mut self, func: &Function, args: Vec<LoxObject>) {
         let params = func.params();
         if params.len() == 0 {
             return;
         }
-        while args.len() < params.len() {
-            args.push(LoxObject::new_nil());
+        for param in params {
+            self.declare(param);
         }
         let pairs = params.iter().zip(args.into_iter());
         for (name, value) in pairs {
-            self.bind_local(name, value);
+            self.define(name, value);
         }
     }
 }
 
-impl Visitor<EvalResult> for Lox {
+impl Visitor<EvalResult, Expr, Stmt> for Lox {
     fn visit_binary(&mut self, left: &Expr, op: BinaryOperator, right: &Expr) -> EvalResult {
         let l = unwrap_to_object(left.accept(self)?).map_err(|e| e.with_place(op.view()))?;
         let r = unwrap_to_object(right.accept(self)?).map_err(|e| e.with_place(op.view()))?;
@@ -149,25 +161,31 @@ impl Visitor<EvalResult> for Lox {
     }
 
     fn visit_variable(&mut self, ident: &Identifier) -> EvalResult {
-        if let Some(v) = self.resolve(ident.name_str()) {
-            Ok(v.into())
+        let v = if let Some((depth, slot)) = ident.depth_slot() {
+            self.get_at(depth, slot).into()
         } else {
-            Err(reference_error(ident))
-        }
+            self.get_global(ident.name_str())
+                .ok_or_else(|| reference_error(ident))?
+        };
+        Ok(v.into())
     }
 
     fn visit_assignment(&mut self, ident: &Identifier, value: &Expr) -> EvalResult {
         let eval = value.accept(self)?;
         let value = unwrap_to_object(eval).map_err(|e| e.with_place(ident.view()))?;
-        if let Some(_) = self.bind(ident.name_str(), value.clone()) {
+        // println!("ident is {:#?}", ident);
+        if let Some((depth, slot)) = ident.depth_slot() {
+            self.set_at(depth, slot, value.clone());
+            return Ok(value.into());
+        } else {
+            self.set_global(ident.name_str(), value.clone());
             return Ok(value.into());
         };
-        Err(reference_error(ident))
     }
 
     fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> EvalResult {
-        let result = callee.expr.accept(self)?;
-        let call_obj = unwrap_to_object(result).map_err(|e| e.with_place(callee.view()))?;
+        let eval = callee.expr.accept(self)?;
+        let call_obj = unwrap_to_object(eval).map_err(|e| e.with_place(callee.view()))?;
         let mut rt_args = Vec::with_capacity(args.len());
         for arg in args {
             let eval = arg.accept(self)?;
@@ -181,10 +199,23 @@ impl Visitor<EvalResult> for Lox {
                 .map(|v| v.unwrap_return())
                 .map_err(|e| e.with_place(callee.view())),
             _ => Err(
-                RuntimeError::from(LoxError::DebugError("this shouldn't be reachable"))
+                RuntimeError::from(type_error("function", call_obj.type_str()))
                     .with_place(callee.view()),
             ),
         }
+    }
+
+    fn visit_function(&mut self, value: &ast::Function) -> EvalResult {
+        Ok(LoxObject::Function(Rc::new(Function::new(
+            self.current_scope.clone(),
+            value
+                .params()
+                .iter()
+                .map(|p| p.name_str().to_string())
+                .collect(),
+            value.body(),
+        )))
+        .into())
     }
 
     fn visit_break_statement(&mut self) -> EvalResult {
@@ -214,25 +245,28 @@ impl Visitor<EvalResult> for Lox {
         Ok(v)
     }
 
-    fn visit_var_statement(&mut self, ident: &Identifier, expr: Option<&Expr>) -> EvalResult {
-        if self.has_local(ident.name_str()) {
-            let msg = format!(
-                "identifier '{}' has already been declared",
-                ident.name_str()
-            );
-            let err = LoxError::UncaughtSyntaxError(msg);
-            return Err(RuntimeError::from(err).with_place(ident.view()));
+    fn visit_var_statement(
+        &mut self,
+        ident: &Identifier,
+        initializer: Option<&Expr>,
+    ) -> EvalResult {
+        // 1. Evaluate the initializer (or nil)
+        let value = if let Some(expr) = initializer {
+            unwrap_to_object(expr.accept(self)?)?
+        } else {
+            LoxObject::new_nil()
+        };
+
+        // 2. If resolver gave us a (depth,slot), it's a local…
+        if let Some(_) = ident.depth_slot() {
+            self.declare(ident.name_str());
+            self.define(ident.name_str(), value.clone())
+        } else {
+            // …otherwise it's a global
+            self.set_global(ident.name_str(), value.clone());
         }
-        let value = expr
-            .map(|e| e.accept(self))
-            .unwrap_or(Ok(Eval::new_nil()))?;
-        match value {
-            Eval::Object(obj) => {
-                self.bind_local(ident.name_str(), obj);
-                Ok(Eval::new_nil())
-            }
-            _ => Err(type_error("object", value.type_str()).with_place(ident.view())),
-        }
+
+        Ok(Eval::new_nil())
     }
 
     fn visit_block_statement(&mut self, statments: &[Stmt]) -> EvalResult {
@@ -277,24 +311,6 @@ impl Visitor<EvalResult> for Lox {
             }
         }
         Ok(LoxObject::new_nil().into())
-    }
-
-    fn visit_function_statement(
-        &mut self,
-        name: &Identifier,
-        params: &[Identifier],
-        body: Rc<Stmt>,
-    ) -> EvalResult {
-        let closure = self.scope_now();
-        let params: Vec<String> = params
-            .iter()
-            .map(|ident| ident.name_str().to_string())
-            .collect();
-        let body = body.clone();
-        let function = Rc::new(Function::new(closure, params, body));
-        self.bind_local(name.name_str(), LoxObject::Function(function.clone()));
-        self.create_scope();
-        Ok(LoxObject::Function(function).into())
     }
 }
 
