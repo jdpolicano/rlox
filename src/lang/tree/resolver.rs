@@ -1,7 +1,6 @@
 use crate::lang::tree::ast::*;
 use crate::lang::visitor::Visitor;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 /// A Resolver walks your AST **before** runtime and:
 /// 1. Assigns each variable use a (depth, slot) pair.

@@ -1,5 +1,4 @@
 use super::error::ConversionError;
-use crate::lang::native::Native;
 use crate::lang::tokenizer::token::{Token, TokenType};
 use crate::lang::view::View;
 use crate::lang::visitor::Visitor;

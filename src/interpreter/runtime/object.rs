@@ -2,7 +2,6 @@ use super::function::Function;
 use super::native::NativeFn;
 use super::primitive::Primitive;
 use crate::lang::tree::ast;
-use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 

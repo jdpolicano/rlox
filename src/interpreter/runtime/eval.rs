@@ -1,5 +1,4 @@
 use super::control::Control;
-use super::error::LoxError;
 use super::error::RuntimeError;
 use super::object::LoxObject;
 use std::fmt;
