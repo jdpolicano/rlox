@@ -300,19 +300,19 @@ impl Callee {
 
 #[derive(Debug)]
 pub struct Function {
-    is_anonymous: bool,
-    name: Identifier,
+    name: Option<Identifier>,
     params: Vec<Identifier>,
     body: Rc<Stmt>,
+    view: View,
 }
 
 impl Function {
     pub fn view(&self) -> View {
-        self.name.view()
+        self.view
     }
 
     pub fn is_anonymous(&self) -> bool {
-        self.is_anonymous
+        self.name.is_none()
     }
 
     pub fn params(&self) -> &[Identifier] {
@@ -323,21 +323,21 @@ impl Function {
         self.body.clone()
     }
 
-    pub fn name(&self) -> Identifier {
+    pub fn name(&self) -> Option<Identifier> {
         self.name.clone()
     }
 
     pub fn new(
-        is_anonymous: bool,
-        name: Identifier,
+        name: Option<Identifier>,
         params: Vec<Identifier>,
         body: Rc<Stmt>,
+        view: View,
     ) -> Self {
         Self {
-            is_anonymous,
             name,
             params,
             body,
+            view,
         }
     }
 }

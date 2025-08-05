@@ -2,17 +2,9 @@ use rloxv2::interpreter::lox::Lox;
 use rloxv2::lang::tree::parser::Parser;
 use rloxv2::lang::tree::resolver::Resolver;
 const INPUT: &str = r#"
-fun withCallback(userFun) {
-    return fun(a, b) {
-        return userFun(a, b);
-    }
-}
-
-var csvJoin = withCallback(fun (a, b) {
-    return a + "," + b;
-});
-
-print csvJoin("first", "second" + ",");
+fun () {
+    print "yes";
+}();
 "#;
 
 fn main() {
