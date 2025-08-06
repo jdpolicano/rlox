@@ -1,5 +1,6 @@
 use super::function::Function;
 use super::object::LoxObject;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
@@ -10,15 +11,27 @@ const DEFAULT_PROPERTY_HASH_SIZE: usize = 16;
 pub struct Class {
     name: String,
     methods: HashMap<String, LoxObject>,
+    init: Option<LoxObject>,
 }
 
 impl Class {
-    pub fn new(name: String, methods: HashMap<String, LoxObject>) -> Self {
-        return Self { name, methods };
+    pub fn new(name: String, methods: HashMap<String, LoxObject>, init: Option<LoxObject>) -> Self {
+        return Self {
+            name,
+            methods,
+            init,
+        };
     }
 
     pub fn get_method(&self, name: &str) -> Option<&LoxObject> {
         self.methods.get(name)
+    }
+
+    pub fn init(&self) -> Option<Rc<Function>> {
+        if let Some(LoxObject::Function(ref init)) = self.init {
+            return Some(init.clone());
+        }
+        None
     }
 }
 
@@ -42,6 +55,10 @@ impl ClassInstance {
         };
     }
 
+    pub fn new_lox_object(constructor: Rc<Class>) -> LoxObject {
+        LoxObject::ClassInstance(Rc::new(RefCell::new(Self::new(constructor))))
+    }
+
     pub fn get(&self, prop: &str) -> Option<&LoxObject> {
         self.properties
             .get(prop)
@@ -50,6 +67,10 @@ impl ClassInstance {
 
     pub fn set(&mut self, prop: &str, value: LoxObject) -> Option<LoxObject> {
         self.properties.insert(prop.to_string(), value)
+    }
+
+    pub fn init(&self) -> Option<Rc<Function>> {
+        self.constructor.init()
     }
 }
 

@@ -84,7 +84,7 @@ impl Resolver {
         None
     }
 
-    fn resolveFunction(&mut self, t: FuncType, value: &Function) -> Result<(), String> {
+    fn resolve_function(&mut self, t: FuncType, value: &Function) -> Result<(), String> {
         // now we begin a scope for local vars.
         self.begin_scope();
         for param in value.params() {
@@ -151,7 +151,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
     }
 
     fn visit_function(&mut self, value: &Function) -> Result<(), String> {
-        self.resolveFunction(FuncType::Function, value)
+        self.resolve_function(FuncType::Function, value)
     }
 
     fn visit_assignment(&mut self, name: &Identifier, value: &Expr) -> Result<(), String> {
@@ -271,7 +271,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
         self.begin_scope();
         self.put_str("this");
         for method in methods {
-            self.resolveFunction(FuncType::Method, method)?;
+            self.resolve_function(FuncType::Method, method)?;
         }
         self.end_scope();
         Ok(())

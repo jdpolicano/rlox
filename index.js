@@ -1,6 +1,10 @@
-class MyClass {}
-const other = MyClass;
+class MyClass {
+  name() {
+    return this.name;
+  }
+}
 
-console.log(MyClass);
+mc = new MyClass();
+mc.name = "jacob";
 
-console.log(new MyClass());
+console.log(mc.name());

@@ -2,13 +2,7 @@ use rloxv2::interpreter::lox::Lox;
 use rloxv2::lang::tree::parser::Parser;
 use rloxv2::lang::tree::resolver::Resolver;
 const INPUT: &str = r#"
-class Foo {
-  returnSelf() {
-    return Foo;
-  }
-}
 
-print Foo().returnSelf(); // expect: Foo
 "#;
 
 fn main() {

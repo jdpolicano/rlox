@@ -212,7 +212,15 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
                 .map_err(|e| e.with_place(callee.view())),
             LoxObject::Class(c) => {
                 let instance = ClassInstance::new(c);
-                Ok(LoxObject::from(instance).into())
+                if let Some(init) = instance.init() {
+                    let obj = LoxObject::from(instance);
+                    let _ = self
+                        .call_fn(&init.bind(obj.clone()), rt_args)
+                        .map_err(|e| e.with_place(callee.view()))?;
+                    Ok(obj.into())
+                } else {
+                    Ok(LoxObject::from(instance).into())
+                }
             }
             _ => Err(
                 RuntimeError::from(type_error("function", call_obj.type_str()))
@@ -369,6 +377,7 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
         methods: &[ast::Function],
     ) -> EvalResult {
         let mut class_methods = HashMap::with_capacity(methods.len());
+        let mut init = None;
         for method in methods {
             // the parser should have already confirmed that this is safe.
             let name = method.name().unwrap().name_str().to_string();
@@ -381,10 +390,15 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
                     .collect(),
                 method.body(),
             );
-            class_methods.insert(name, LoxObject::from(func));
+
+            if name == "init" {
+                init.replace(LoxObject::from(func));
+            } else {
+                class_methods.insert(name, LoxObject::from(func));
+            }
         }
         let class_name = String::from(name.name_str());
-        let class = LoxObject::from(Class::new(class_name, class_methods));
+        let class = LoxObject::from(Class::new(class_name, class_methods, init));
         self.bind(name, class.clone());
         Ok(Eval::Object(class))
     }

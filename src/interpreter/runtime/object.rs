@@ -46,6 +46,12 @@ impl From<&str> for LoxObject {
     }
 }
 
+impl From<String> for LoxObject {
+    fn from(value: String) -> Self {
+        Self::Primitive(value.into())
+    }
+}
+
 impl From<(&str, &str)> for LoxObject {
     fn from(value: (&str, &str)) -> Self {
         let mut container = String::with_capacity(value.0.len() + value.1.len());

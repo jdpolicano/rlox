@@ -1,4 +1,3 @@
-
 use crate::lang::view::View;
 use thiserror::Error;
 
@@ -45,8 +44,10 @@ pub enum LoxError {
 
 #[derive(Error, Debug, Clone)]
 pub enum NativeError {
-    #[error("NativeError {0}")]
+    #[error("NativeError: {0}")]
     SystemError(String),
+    #[error("NativeError: {0}")]
+    InvalidArguments(String),
 }
 
 // this is purly for routing logic to understand why something failed.
