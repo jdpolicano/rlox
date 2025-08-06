@@ -22,7 +22,7 @@ pub enum ConversionError {
 // todo: fill this out.s
 #[derive(Error, Debug)]
 pub enum ParseError {
-    #[error("SyntaxError: {0}")]
+    #[error("{0}")]
     ScanError(#[from] ScanError),
     #[error("SyntaxError: {0}")]
     ConversionError(#[from] ConversionError),
@@ -38,10 +38,12 @@ pub enum ParseError {
     InvalidLoopKeyword { type_str: String, location: View },
     #[error("SyntaxError: cannot use 'return' out side of a function {location}")]
     InvalidReturn { location: View },
-    #[error("SyntaxError: function arguments cannot exceed {location}")]
+    #[error("SyntaxError: function arguments cannot exceed 255 {location}")]
     FuncExceedMaxArgs { max: usize, location: View },
     #[error("SyntaxError: invalid function statement {location}")]
     InvalidFuncStatement { location: View },
+    #[error("SyntaxError: invalid class method {location}")]
+    InvalidClassMethod { location: View },
     #[error("SyntaxError: unexpected end of file")]
     UnexpectedEof,
 }

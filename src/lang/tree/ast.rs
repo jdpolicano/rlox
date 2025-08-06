@@ -275,7 +275,7 @@ impl TryFrom<Token<'_>> for Identifier {
             // you can convert a fun to an identifier because
             // we support anonymous functions whose name essentially becomes the
             // location where it was declared.
-            TokenType::Identifier | TokenType::Fun => Ok(Self {
+            TokenType::Identifier | TokenType::Fun | TokenType::This => Ok(Self {
                 name: value.lexeme.to_string(),
                 view: value.pos,
                 slot: Cell::new(None),
@@ -303,12 +303,23 @@ pub struct Function {
     name: Option<Identifier>,
     params: Vec<Identifier>,
     body: Rc<Stmt>,
-    view: View,
+    // marker view is the fallback location we'll point out
+    // if we encounter an issue with this function.
+    // The default is the name of the function if its available.
+    marker_view: View,
 }
 
 impl Function {
+    pub fn with_view(mut self, v: View) -> Self {
+        self.marker_view = v;
+        self
+    }
+
     pub fn view(&self) -> View {
-        self.view
+        self.name
+            .as_ref()
+            .map(|ident| ident.view())
+            .unwrap_or(self.marker_view)
     }
 
     pub fn is_anonymous(&self) -> bool {
@@ -331,13 +342,13 @@ impl Function {
         name: Option<Identifier>,
         params: Vec<Identifier>,
         body: Rc<Stmt>,
-        view: View,
+        marker_view: View,
     ) -> Self {
         Self {
             name,
             params,
             body,
-            view,
+            marker_view,
         }
     }
 }
@@ -386,6 +397,22 @@ pub enum Expr {
     Function {
         value: Function,
     },
+
+    Get {
+        object: Box<Expr>,
+        property: Identifier,
+    },
+
+    Set {
+        object: Box<Expr>,
+        property: Identifier,
+        value: Box<Expr>,
+    },
+
+    This {
+        // it needs to be an identifier because we will look it up like any other variable name.
+        ident: Identifier,
+    },
 }
 
 impl Expr {
@@ -403,20 +430,30 @@ impl Expr {
             Expr::Logical { left, op, right } => v.visit_logical(left, *op, right),
             Expr::Call { callee, args } => v.visit_call(callee, args),
             Expr::Function { value } => v.visit_function(value),
+            Expr::Get { object, property } => v.visit_get(object, property),
+            Expr::Set {
+                object,
+                property,
+                value,
+            } => v.visit_set(object, property, value),
+            Expr::This { ident } => v.visit_this(ident),
         }
     }
 
     pub fn type_str(&self) -> &str {
         match self {
-            Expr::Binary { .. } => "binary",
-            Expr::Grouping { .. } => "grouping",
-            Expr::Literal { .. } => "literal",
-            Expr::Unary { .. } => "unary",
-            Expr::Variable { .. } => "var",
-            Expr::Assignment { .. } => "assignment",
-            Expr::Logical { .. } => "logical",
-            Expr::Call { .. } => "call",
-            Expr::Function { .. } => "function expression",
+            Self::Binary { .. } => "binary",
+            Self::Grouping { .. } => "grouping",
+            Self::Literal { .. } => "literal",
+            Self::Unary { .. } => "unary",
+            Self::Variable { .. } => "var",
+            Self::Assignment { .. } => "assignment",
+            Self::Logical { .. } => "logical",
+            Self::Call { .. } => "call",
+            Self::Function { .. } => "function expression",
+            Self::Get { .. } => "get",
+            Self::Set { .. } => "set",
+            Self::This { .. } => "this",
         }
     }
 }
@@ -451,6 +488,11 @@ pub enum Stmt {
         block: Box<Stmt>,
     },
 
+    Class {
+        name: Identifier,
+        methods: Vec<Function>,
+    },
+
     Break,
     Continue,
     Return {
@@ -482,6 +524,7 @@ impl Stmt {
             Self::Break => v.visit_break_statement(),
             Self::Continue => v.visit_continue_statment(),
             Self::Return { value } => v.visit_return_statment(value.as_ref()),
+            Self::Class { name, methods } => v.visit_class_statement(name, methods),
         }
     }
 
@@ -496,6 +539,7 @@ impl Stmt {
             Self::Break => "break",
             Self::Continue => "continue",
             Self::Return { .. } => "return",
+            Self::Class { .. } => "class",
         }
     }
 }

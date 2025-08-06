@@ -1,3 +1,4 @@
+pub mod class;
 pub mod control;
 pub mod error;
 pub mod eval;

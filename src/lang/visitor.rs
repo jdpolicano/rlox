@@ -13,6 +13,9 @@ pub trait Visitor<T, Expr, Stmt> {
     fn visit_assignment(&mut self, name: &Identifier, value: &Expr) -> T;
     fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> T;
     fn visit_function(&mut self, value: &Function) -> T;
+    fn visit_get(&mut self, object: &Expr, property: &Identifier) -> T;
+    fn visit_set(&mut self, object: &Expr, property: &Identifier, value: &Expr) -> T;
+    fn visit_this(&mut self, ident: &Identifier) -> T;
     // statments
     fn visit_expression_statement(&mut self, expr: &Expr) -> T;
     fn visit_print_statement(&mut self, expr: &Expr) -> T;
@@ -28,4 +31,5 @@ pub trait Visitor<T, Expr, Stmt> {
     fn visit_break_statement(&mut self) -> T;
     fn visit_continue_statment(&mut self) -> T;
     fn visit_return_statment(&mut self, value: Option<&Expr>) -> T;
+    fn visit_class_statement(&mut self, name: &Identifier, methods: &[Function]) -> T;
 }

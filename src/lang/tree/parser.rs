@@ -126,10 +126,14 @@ impl<'a> Parser<'a> {
 
     fn declaration(&mut self) -> Result<Stmt, ParseError> {
         if self.match_one(TokenType::Var).is_some() {
-            self.var_declaration()
-        } else {
-            self.statement()
+            return self.var_declaration();
         }
+
+        if self.match_one(TokenType::Class).is_some() {
+            return self.class_declaration();
+        }
+
+        return self.statement();
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, ParseError> {
@@ -149,6 +153,32 @@ impl<'a> Parser<'a> {
         Ok(Stmt::Var {
             name: name.try_into()?,
             initializer,
+        })
+    }
+
+    fn class_declaration(&mut self) -> Result<Stmt, ParseError> {
+        let class_name = self.expect(
+            "class delcaration requires an identifier",
+            TokenType::Identifier,
+        )?;
+        self.expect("class statement left brace", TokenType::LeftBrace)?;
+        let mut methods = Vec::new();
+        while let Some(t) = self.tokens.peek() {
+            if t.is_err() || t.unwrap().token_type == TokenType::RightBrace {
+                break;
+            }
+            let func = self.function(None)?;
+            if func.is_anonymous() {
+                return Err(ParseError::InvalidClassMethod {
+                    location: func.view(),
+                });
+            }
+            methods.push(func);
+        }
+        self.expect("class statement right brace", TokenType::RightBrace)?;
+        Ok(Stmt::Class {
+            name: class_name.try_into()?,
+            methods,
         })
     }
 
@@ -242,17 +272,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn fun_statement(&mut self) -> Result<Stmt, ParseError> {
-        let error_loc = self.tokens.last().unwrap().pos;
-        let func_expr = self.expression()?;
-        match func_expr {
-            Expr::Function { value } => Ok(desugar_function_statement(value)),
-            _ => Err(ParseError::InvalidFuncStatement {
-                location: error_loc,
-            }),
-        }
-    }
-
     fn break_statement(&mut self) -> Result<Stmt, ParseError> {
         let keyword = self.tokens.last().unwrap();
         if !self.is_in_loop() {
@@ -285,20 +304,23 @@ impl<'a> Parser<'a> {
             });
         }
 
-        let mut expr = None;
-        if !self.next_is_semicolon()? {
-            let ret_value = self.expression()?;
-            match ret_value {
-                Expr::Function { .. } => {
-                    return Ok(Stmt::Return {
-                        value: Some(ret_value),
-                    });
-                }
-                _ => expr = Some(ret_value),
+        if let Some(_) = self.match_one(TokenType::Semicolon) {
+            return Ok(Stmt::Return { value: None });
+        }
+
+        // return only requires a terminating semi-colon for non-function expressions.
+        let ret_expr = self.expression()?;
+        match ret_expr {
+            Expr::Function { .. } => Ok(Stmt::Return {
+                value: Some(ret_expr),
+            }),
+            _ => {
+                self.expect("unterminated return statement", TokenType::Semicolon)?;
+                Ok(Stmt::Return {
+                    value: Some(ret_expr),
+                })
             }
         }
-        self.expect("unterminated return statement", TokenType::Semicolon)?;
-        Ok(Stmt::Return { value: expr })
     }
 
     fn block_statement(&mut self) -> Result<Stmt, ParseError> {
@@ -337,11 +359,13 @@ impl<'a> Parser<'a> {
     fn assignment(&mut self) -> Result<Expr, ParseError> {
         let expr = self.logical_or()?;
         if let Some(eq) = self.match_one(TokenType::Equal) {
-            let assign_value = self.assignment()?;
+            let value = Box::new(self.assignment()?);
             return match expr {
-                Expr::Variable { value: name } => Ok(Expr::Assignment {
-                    name,
-                    value: Box::new(assign_value),
+                Expr::Variable { value: name } => Ok(Expr::Assignment { name, value }),
+                Expr::Get { object, property } => Ok(Expr::Set {
+                    object,
+                    property,
+                    value,
                 }),
                 _ => Err(ParseError::UnexpectedAssignment {
                     type_str: expr.type_str().to_string(),
@@ -470,23 +494,46 @@ impl<'a> Parser<'a> {
 
     fn call(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
-        while let Some(paren) = self.match_one(TokenType::LeftParen) {
-            let args = self.arguments()?;
-            if args.len() > MAX_FUNC_ARGS {
-                return Err(ParseError::FuncExceedMaxArgs {
-                    max: MAX_FUNC_ARGS,
-                    location: paren.pos,
-                });
+        while let Some(next) = self.tokens.peek() {
+            match next {
+                Ok(t) if t.token_type == TokenType::LeftParen => {
+                    expr = self.handle_call(expr)?;
+                }
+                Ok(t) if t.token_type == TokenType::Dot => {
+                    expr = self.handle_dot_access(expr)?;
+                }
+                Ok(_) => break,
+                Err(e) => return Err(e),
             }
-            expr = Expr::Call {
-                callee: Callee {
-                    expr: Box::new(expr),
-                    view: paren.pos,
-                },
-                args,
-            };
         }
         Ok(expr)
+    }
+
+    fn handle_call(&mut self, expr: Expr) -> Result<Expr, ParseError> {
+        let paren = self.tokens.next()?;
+        let args = self.arguments()?;
+        if args.len() > MAX_FUNC_ARGS {
+            return Err(ParseError::FuncExceedMaxArgs {
+                max: MAX_FUNC_ARGS,
+                location: paren.pos,
+            });
+        }
+        Ok(Expr::Call {
+            callee: Callee {
+                expr: Box::new(expr),
+                view: paren.pos,
+            },
+            args,
+        })
+    }
+
+    fn handle_dot_access(&mut self, expr: Expr) -> Result<Expr, ParseError> {
+        let _dot = self.tokens.next()?;
+        let name = self.expect("dot access missing identifier", TokenType::Identifier)?;
+        Ok(Expr::Get {
+            object: Box::new(expr),
+            property: name.try_into()?,
+        })
     }
 
     fn arguments(&mut self) -> Result<Vec<Expr>, ParseError> {
@@ -535,8 +582,8 @@ impl<'a> Parser<'a> {
             });
         }
 
-        if self.match_one(TokenType::Fun).is_some() {
-            return self.fun_expression();
+        if let Some(fun) = self.match_one(TokenType::Fun) {
+            return self.fun_expression(fun.pos);
         }
 
         if let Some(name) = self.match_one(TokenType::Identifier) {
@@ -545,18 +592,25 @@ impl<'a> Parser<'a> {
             });
         }
 
+        if let Some(this) = self.match_one(TokenType::This) {
+            return Ok(Expr::This {
+                ident: this.try_into()?,
+            });
+        }
+
         let next_tok = self.tokens.next()?;
         let value = next_tok.try_into()?;
         Ok(Expr::Literal { value })
     }
 
-    fn fun_expression(&mut self) -> Result<Expr, ParseError> {
+    fn fun_expression(&mut self, marker_location: View) -> Result<Expr, ParseError> {
+        Ok(Expr::Function {
+            value: self.function(Some(marker_location))?,
+        })
+    }
+
+    fn function(&mut self, marker_location: Option<View>) -> Result<Function, ParseError> {
         self.enter_fn();
-        let fn_keyword = self
-            .tokens
-            .last()
-            .expect("token was already checked")
-            .clone();
         // if the function is anonymous then there will be no identifier after it.
         let name = if let Some(t) = self.match_one(TokenType::Identifier) {
             Some(Identifier::try_from(t)?)
@@ -564,20 +618,20 @@ impl<'a> Parser<'a> {
             None
         };
         // regardless of the above point, it must be followed by some params
-        let _ = self.expect("function dec must open", TokenType::LeftParen)?;
+        let begin_args = self.expect("function dec must open", TokenType::LeftParen)?;
         let params = self.parameters()?;
         // functions are required to be followed by a block scope, so we force this by doing a little look-ahead.
-        self.expect("function must open to block scope", TokenType::LeftBrace)?;
-        let ret = Ok(Expr::Function {
-            value: Function::new(
-                name,
-                params,
-                Rc::new(self.block_statement()?),
-                fn_keyword.pos,
-            ),
-        });
+        let _ = self.expect("function must open to block scope", TokenType::LeftBrace)?;
+        let ret = Function::new(
+            name,
+            params,
+            Rc::new(self.block_statement()?),
+            // if the caller didn't already have a place to point
+            // diagnostics, then we should default to whereever the args began.
+            marker_location.unwrap_or(begin_args.pos),
+        );
         self.exit_fn();
-        ret
+        Ok(ret)
     }
 
     fn match_one(&mut self, t: TokenType) -> Option<Token<'a>> {
@@ -592,41 +646,6 @@ impl<'a> Parser<'a> {
             }
         }
         None
-    }
-
-    fn next_is_break(&mut self) -> Result<bool, ParseError> {
-        Ok(self
-            .tokens
-            .peek_next_if(|t| t.token_type == TokenType::Break)?
-            .is_some())
-    }
-
-    fn next_is_continue(&mut self) -> Result<bool, ParseError> {
-        Ok(self
-            .tokens
-            .peek_next_if(|t| t.token_type == TokenType::Continue)?
-            .is_some())
-    }
-
-    fn next_is_return(&mut self) -> Result<bool, ParseError> {
-        Ok(self
-            .tokens
-            .peek_next_if(|t| t.token_type == TokenType::Return)?
-            .is_some())
-    }
-
-    fn next_is_fun(&mut self) -> Result<bool, ParseError> {
-        Ok(self
-            .tokens
-            .peek_next_if(|t| t.token_type == TokenType::Fun)?
-            .is_some())
-    }
-
-    fn next_is_semicolon(&mut self) -> Result<bool, ParseError> {
-        Ok(self
-            .tokens
-            .peek_next_if(|t| t.token_type == TokenType::Semicolon)?
-            .is_some())
     }
 
     fn expect(&mut self, msg: &'static str, t: TokenType) -> Result<Token<'a>, ParseError> {

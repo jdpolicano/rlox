@@ -2,9 +2,13 @@ use rloxv2::interpreter::lox::Lox;
 use rloxv2::lang::tree::parser::Parser;
 use rloxv2::lang::tree::resolver::Resolver;
 const INPUT: &str = r#"
-fun () {
-    print "yes";
-}();
+class Foo {
+  returnSelf() {
+    return Foo;
+  }
+}
+
+print Foo().returnSelf(); // expect: Foo
 "#;
 
 fn main() {
@@ -21,10 +25,7 @@ fn main() {
             println!("{e}");
             break;
         }
-        // println!("{:#?}", stmt);
     }
-    //println!("{:#?}", stmts);
-    // return;
     if let Err(e) = lox.interpret(stmts) {
         println!("{}", e);
     };

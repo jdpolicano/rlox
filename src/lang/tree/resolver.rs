@@ -2,6 +2,11 @@ use crate::lang::tree::ast::*;
 use crate::lang::visitor::Visitor;
 use std::collections::HashMap;
 
+enum FuncType {
+    Method,
+    Function,
+}
+
 /// A Resolver walks your AST **before** runtime and:
 /// 1. Assigns each variable use a (depth, slot) pair.
 /// 2. Detects reads in their own initializer.
@@ -61,6 +66,13 @@ impl Resolver {
         }
     }
 
+    fn put_str(&mut self, name: &str) {
+        if let Some(scope) = self.scopes.last_mut() {
+            let slot = scope.len();
+            scope.insert(name.to_string(), (slot, true));
+        }
+    }
+
     /// Look up a name through the scope stack.
     /// Returns `Some((depth, (slot, is_defined)))` or `None` if not found.
     fn resolve_local(&self, name: &str) -> Option<(usize, (usize, bool))> {
@@ -70,6 +82,18 @@ impl Resolver {
             }
         }
         None
+    }
+
+    fn resolveFunction(&mut self, t: FuncType, value: &Function) -> Result<(), String> {
+        // now we begin a scope for local vars.
+        self.begin_scope();
+        for param in value.params() {
+            self.declare(param)?;
+            self.define(param);
+        }
+        value.body().accept(self)?;
+        self.end_scope();
+        Ok(())
     }
 }
 
@@ -81,20 +105,30 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
     ) -> Result<(), String> {
         // 1. Declare (adds slot=false). Errors on duplicate.
         self.declare(ident)?;
-        // 2. Resolve initializer with that slot “pending”.
-        if let Some(expr) = init {
-            match expr {
-                Expr::Function { value } if !value.is_anonymous() => {
-                    // function declarations can refer to themselves re
-                    self.define(ident);
-                }
-                _ => {}
+        // if there is nothing to initalize with, define the var and move on.
+        let expr = match init {
+            Some(e) => e,
+            _ => {
+                self.define(ident);
+                return Ok(());
             }
-            expr.accept(self)?;
+        };
+        // else we need to handle some edge cases with functions.
+        match expr {
+            // named functions can refer to themselves recursively. so we need to define it before
+            // we evaluate its body.
+            Expr::Function { value } if !value.is_anonymous() => {
+                self.define(ident);
+                expr.accept(self)?;
+                return Ok(());
+            }
+            // everything else cannot so only define it AFTER we have visited the intializer;
+            _ => {
+                expr.accept(self)?;
+                self.define(ident);
+                return Ok(());
+            }
         }
-        // 3. Now mark the slot defined = true.
-        self.define(ident);
-        Ok(())
     }
 
     fn visit_variable(&mut self, name: &Identifier) -> Result<(), String> {
@@ -117,15 +151,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
     }
 
     fn visit_function(&mut self, value: &Function) -> Result<(), String> {
-        // now we begin a scope for local vars.
-        self.begin_scope();
-        for param in value.params() {
-            self.declare(param)?;
-            self.define(param);
-        }
-        value.body().accept(self)?;
-        self.end_scope();
-        Ok(())
+        self.resolveFunction(FuncType::Function, value)
     }
 
     fn visit_assignment(&mut self, name: &Identifier, value: &Expr) -> Result<(), String> {
@@ -230,6 +256,53 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
     fn visit_return_statment(&mut self, value: Option<&Expr>) -> Result<(), String> {
         if let Some(expr) = value {
             expr.accept(self)?;
+        }
+        Ok(())
+    }
+
+    fn visit_class_statement(
+        &mut self,
+        name: &Identifier,
+        methods: &[Function],
+    ) -> Result<(), String> {
+        self.declare(name)?;
+        self.define(name);
+
+        self.begin_scope();
+        self.put_str("this");
+        for method in methods {
+            self.resolveFunction(FuncType::Method, method)?;
+        }
+        self.end_scope();
+        Ok(())
+    }
+
+    fn visit_get(&mut self, object: &Expr, _property: &Identifier) -> Result<(), String> {
+        object.accept(self)
+    }
+
+    fn visit_set(
+        &mut self,
+        object: &Expr,
+        _property: &Identifier,
+        value: &Expr,
+    ) -> Result<(), String> {
+        object.accept(self)?;
+        value.accept(self)?;
+        Ok(())
+    }
+
+    fn visit_this(&mut self, ident: &Identifier) -> Result<(), String> {
+        // now figure out if the target is a local or global var
+        if let Some((depth, (slot, _))) = self.resolve_local(ident.name_str()) {
+            // Store the resolved metadata back into the AST node if it was a local var.
+            ident.swap_depth(depth);
+            ident.swap_slot(slot);
+        } else {
+            return Err(format!(
+                "'this' cannot be used in the global scope {}",
+                ident.view()
+            ));
         }
         Ok(())
     }

@@ -1,3 +1,4 @@
+use crate::interpreter::runtime::class::{Class, ClassInstance};
 use crate::interpreter::runtime::error::{BinaryError, LoxError, RuntimeError};
 use crate::interpreter::runtime::eval::{Eval, EvalResult};
 use crate::interpreter::runtime::function::Function;
@@ -40,6 +41,17 @@ impl Lox {
 
     fn define(&mut self, name: &str, value: LoxObject) {
         self.current_scope.borrow_mut().define(name, value);
+    }
+
+    fn bind(&mut self, ident: &Identifier, value: LoxObject) {
+        // 2. If resolver gave us a (depth,slot), it's a local…
+        if let Some(_) = ident.depth_slot() {
+            self.declare(ident.name_str());
+            self.define(ident.name_str(), value)
+        } else {
+            // …otherwise it's a global
+            self.set_global(ident.name_str(), value);
+        }
     }
 
     fn set_at(&mut self, distance: usize, slot: usize, value: LoxObject) {
@@ -198,6 +210,10 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
                 .call_fn(f.as_ref(), rt_args)
                 .map(|v| v.unwrap_return())
                 .map_err(|e| e.with_place(callee.view())),
+            LoxObject::Class(c) => {
+                let instance = ClassInstance::new(c);
+                Ok(LoxObject::from(instance).into())
+            }
             _ => Err(
                 RuntimeError::from(type_error("function", call_obj.type_str()))
                     .with_place(callee.view()),
@@ -206,7 +222,7 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
     }
 
     fn visit_function(&mut self, value: &ast::Function) -> EvalResult {
-        Ok(LoxObject::Function(Rc::new(Function::new(
+        Ok(LoxObject::from(Function::new(
             self.current_scope.clone(),
             value
                 .params()
@@ -214,8 +230,49 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
                 .map(|p| p.name_str().to_string())
                 .collect(),
             value.body(),
-        )))
+        ))
         .into())
+    }
+
+    fn visit_get(&mut self, object: &Expr, property: &Identifier) -> EvalResult {
+        let obj = object.accept(self)?;
+        match obj {
+            Eval::Object(LoxObject::ClassInstance(ci)) => {
+                if let Some(v) = ci.borrow().get(property.name_str()) {
+                    match v {
+                        LoxObject::Function(func) => {
+                            let obj = LoxObject::ClassInstance(ci.clone());
+                            let bound_func = func.bind(obj);
+                            Ok(LoxObject::from(bound_func).into())
+                        }
+                        _ => Ok(v.clone().into()),
+                    }
+                } else {
+                    Err(ref_error_prop_access(property))
+                }
+            }
+            _ => Err(type_error("class instance", obj.type_str())),
+        }
+    }
+
+    fn visit_set(&mut self, object: &Expr, property: &Identifier, value: &Expr) -> EvalResult {
+        let obj = object.accept(self)?;
+        match obj {
+            Eval::Object(LoxObject::ClassInstance(ci)) => {
+                let eval = value.accept(self)?;
+                let value = unwrap_to_object(eval).map_err(|e| e.with_place(property.view()))?;
+                ci.borrow_mut().set(property.name_str(), value);
+                Ok(Eval::new_nil())
+            }
+            _ => Err(type_error("class instance", obj.type_str())),
+        }
+    }
+
+    fn visit_this(&mut self, ident: &Identifier) -> EvalResult {
+        match self.resolve(ident) {
+            Some(v) => Ok(Eval::from(v)),
+            _ => Err(reference_error(ident)),
+        }
     }
 
     fn visit_break_statement(&mut self) -> EvalResult {
@@ -256,16 +313,7 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
         } else {
             LoxObject::new_nil()
         };
-
-        // 2. If resolver gave us a (depth,slot), it's a local…
-        if let Some(_) = ident.depth_slot() {
-            self.declare(ident.name_str());
-            self.define(ident.name_str(), value.clone())
-        } else {
-            // …otherwise it's a global
-            self.set_global(ident.name_str(), value.clone());
-        }
-
+        self.bind(ident, value);
         Ok(Eval::new_nil())
     }
 
@@ -312,6 +360,34 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
         }
         Ok(LoxObject::new_nil().into())
     }
+
+    // todo: should this just be desugared into a var statement?
+    // I want to wait to see if this is the exact same logic or not.
+    fn visit_class_statement(
+        &mut self,
+        name: &Identifier,
+        methods: &[ast::Function],
+    ) -> EvalResult {
+        let mut class_methods = HashMap::with_capacity(methods.len());
+        for method in methods {
+            // the parser should have already confirmed that this is safe.
+            let name = method.name().unwrap().name_str().to_string();
+            let func = Function::new(
+                self.current_scope.clone(),
+                method
+                    .params()
+                    .iter()
+                    .map(|p| p.name_str().to_string())
+                    .collect(),
+                method.body(),
+            );
+            class_methods.insert(name, LoxObject::from(func));
+        }
+        let class_name = String::from(name.name_str());
+        let class = LoxObject::from(Class::new(class_name, class_methods));
+        self.bind(name, class.clone());
+        Ok(Eval::Object(class))
+    }
 }
 
 fn unary_op(value: &LoxObject, op: UnaryPrefix) -> Result<LoxObject, BinaryError> {
@@ -333,13 +409,13 @@ fn binary_op(l: &LoxObject, r: &LoxObject, op: BinaryOperator) -> Result<LoxObje
         }
         BinaryOperator::Minus { .. } => apply_math_op(l, r, |a, b| a - b),
         BinaryOperator::Slash { .. } => apply_math_op(l, r, |a, b| a / b),
+        BinaryOperator::Star { .. } => apply_math_op(l, r, |a, b| a * b),
         BinaryOperator::Greater { .. } => apply_comparison(l, r, |a, b| a > b),
         BinaryOperator::GreaterEqual { .. } => apply_comparison(l, r, |a, b| a >= b),
         BinaryOperator::Less { .. } => apply_comparison(l, r, |a, b| a < b),
         BinaryOperator::LessEqual { .. } => apply_comparison(l, r, |a, b| a <= b),
         BinaryOperator::Equal { .. } => Ok(LoxObject::from(l == r)),
         BinaryOperator::NotEqual { .. } => Ok(LoxObject::from(l != r)),
-        _ => Err(BinaryError::InvalidOperator),
     }
 }
 
@@ -421,6 +497,11 @@ fn unary_prefix_error(l: &LoxObject, prefix: UnaryPrefix) -> RuntimeError {
 
 fn reference_error(ident: &Identifier) -> RuntimeError {
     let msg = format!("undeclared identifier '{}'", ident.name_str());
+    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.view())
+}
+
+fn ref_error_prop_access(ident: &Identifier) -> RuntimeError {
+    let msg = format!("undefined property '{}'", ident.name_str());
     RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.view())
 }
 
