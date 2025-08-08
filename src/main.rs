@@ -2,7 +2,23 @@ use rloxv2::interpreter::lox::Lox;
 use rloxv2::lang::tree::parser::Parser;
 use rloxv2::lang::tree::resolver::Resolver;
 const INPUT: &str = r#"
+class Int {
+    static test(n) {
+        print "static is working";
+    }
 
+    init(n) {
+        this.n = n;
+    }
+
+    string() {
+        return string(this.n);
+    }
+}
+
+Int.test();
+var i = Int(5);
+print "'" + i.string() + "'";
 "#;
 
 fn main() {

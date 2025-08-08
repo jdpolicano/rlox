@@ -72,6 +72,19 @@ impl Lox {
         self.globals.insert(name.to_string(), value);
     }
 
+    pub fn assign_global(
+        &mut self,
+        name_ident: &Identifier,
+        value: LoxObject,
+    ) -> Result<(), RuntimeError> {
+        let key = name_ident.name_str();
+        if !self.globals.contains_key(key) {
+            return Err(reference_error(name_ident));
+        }
+        self.set_global(key, value);
+        Ok(())
+    }
+
     pub fn resolve(&self, name: &Identifier) -> Option<LoxObject> {
         if let Some((depth, slot)) = name.depth_slot() {
             Some(self.get_at(depth, slot))
@@ -126,12 +139,50 @@ impl Lox {
             self.define(name, value);
         }
     }
+
+    fn handle_object_get(&mut self, obj: LoxObject, property: &Identifier) -> EvalResult {
+        match obj {
+            LoxObject::ClassInstance(ci) => self.handle_class_instance_get(ci, property),
+            LoxObject::Class(c) => self.handle_class_get(c, property),
+            _ => Err(reference_error(property)),
+        }
+    }
+
+    fn handle_class_instance_get(
+        &mut self,
+        ci: Rc<RefCell<ClassInstance>>,
+        property: &Identifier,
+    ) -> EvalResult {
+        if let Some(v) = ci.borrow().get(property.name_str()) {
+            match v {
+                LoxObject::Function(func) => {
+                    let obj = LoxObject::ClassInstance(ci.clone());
+                    let bound_func = func.bind(obj);
+                    Ok(LoxObject::from(bound_func).into())
+                }
+                _ => Ok(v.clone().into()),
+            }
+        } else {
+            Err(ref_error_prop_access(property))
+        }
+    }
+
+    fn handle_class_get(&mut self, class: Rc<Class>, property: &Identifier) -> EvalResult {
+        if let Some(v) = class.get_static(property.name_str()) {
+            match v {
+                LoxObject::Function(func) => Ok(LoxObject::from(func.clone()).into()),
+                _ => Ok(v.clone().into()),
+            }
+        } else {
+            Err(ref_error_prop_access(property))
+        }
+    }
 }
 
 impl Visitor<EvalResult, Expr, Stmt> for Lox {
     fn visit_binary(&mut self, left: &Expr, op: BinaryOperator, right: &Expr) -> EvalResult {
-        let l = unwrap_to_object(left.accept(self)?).map_err(|e| e.with_place(op.view()))?;
-        let r = unwrap_to_object(right.accept(self)?).map_err(|e| e.with_place(op.view()))?;
+        let l = unwrap_to_object(left.accept(self)?).map_err(|e| e.with_place(op.position()))?;
+        let r = unwrap_to_object(right.accept(self)?).map_err(|e| e.with_place(op.position()))?;
         match binary_op(&l, &r, op) {
             Ok(v) => Ok(v.into()),
             Err(err_type) => Err(binary_op_error(&l, &r, op, err_type)),
@@ -165,7 +216,7 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
 
     fn visit_unary(&mut self, prefix: UnaryPrefix, expr: &Expr) -> EvalResult {
         let eval = expr.accept(self)?;
-        let value = unwrap_to_object(eval).map_err(|e| e.with_place(prefix.view()))?;
+        let value = unwrap_to_object(eval).map_err(|e| e.with_place(prefix.position()))?;
         match unary_op(&value, prefix) {
             Ok(v) => Ok(v.into()),
             Err(_) => Err(unary_prefix_error(&value, prefix)),
@@ -184,39 +235,40 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
 
     fn visit_assignment(&mut self, ident: &Identifier, value: &Expr) -> EvalResult {
         let eval = value.accept(self)?;
-        let value = unwrap_to_object(eval).map_err(|e| e.with_place(ident.view()))?;
+        let value = unwrap_to_object(eval).map_err(|e| e.with_place(ident.position()))?;
         // println!("ident is {:#?}", ident);
         if let Some((depth, slot)) = ident.depth_slot() {
             self.set_at(depth, slot, value.clone());
             return Ok(value.into());
         } else {
-            self.set_global(ident.name_str(), value.clone());
-            return Ok(value.into());
+            return self
+                .assign_global(ident, value.clone())
+                .map(|_| Eval::from(value));
         };
     }
 
     fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> EvalResult {
         let eval = callee.expr.accept(self)?;
-        let call_obj = unwrap_to_object(eval).map_err(|e| e.with_place(callee.view()))?;
+        let call_obj = unwrap_to_object(eval).map_err(|e| e.with_place(callee.position()))?;
         let mut rt_args = Vec::with_capacity(args.len());
         for arg in args {
             let eval = arg.accept(self)?;
-            let obj = unwrap_to_object(eval).map_err(|e| e.with_place(callee.view()))?;
+            let obj = unwrap_to_object(eval).map_err(|e| e.with_place(callee.position()))?;
             rt_args.push(obj)
         }
         match call_obj {
-            LoxObject::Native(f) => f(self, rt_args).map_err(|e| e.with_place(callee.view())),
+            LoxObject::Native(f) => f(self, rt_args).map_err(|e| e.with_place(callee.position())),
             LoxObject::Function(f) => self
                 .call_fn(f.as_ref(), rt_args)
                 .map(|v| v.unwrap_return())
-                .map_err(|e| e.with_place(callee.view())),
+                .map_err(|e| e.with_place(callee.position())),
             LoxObject::Class(c) => {
                 let instance = ClassInstance::new(c);
                 if let Some(init) = instance.init() {
                     let obj = LoxObject::from(instance);
                     let _ = self
                         .call_fn(&init.bind(obj.clone()), rt_args)
-                        .map_err(|e| e.with_place(callee.view()))?;
+                        .map_err(|e| e.with_place(callee.position()))?;
                     Ok(obj.into())
                 } else {
                     Ok(LoxObject::from(instance).into())
@@ -224,7 +276,7 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
             }
             _ => Err(
                 RuntimeError::from(type_error("function", call_obj.type_str()))
-                    .with_place(callee.view()),
+                    .with_place(callee.position()),
             ),
         }
     }
@@ -241,24 +293,10 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
         ))
         .into())
     }
-
     fn visit_get(&mut self, object: &Expr, property: &Identifier) -> EvalResult {
         let obj = object.accept(self)?;
         match obj {
-            Eval::Object(LoxObject::ClassInstance(ci)) => {
-                if let Some(v) = ci.borrow().get(property.name_str()) {
-                    match v {
-                        LoxObject::Function(func) => {
-                            let obj = LoxObject::ClassInstance(ci.clone());
-                            let bound_func = func.bind(obj);
-                            Ok(LoxObject::from(bound_func).into())
-                        }
-                        _ => Ok(v.clone().into()),
-                    }
-                } else {
-                    Err(ref_error_prop_access(property))
-                }
-            }
+            Eval::Object(obj) => self.handle_object_get(obj, property),
             _ => Err(type_error("class instance", obj.type_str())),
         }
     }
@@ -268,7 +306,8 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
         match obj {
             Eval::Object(LoxObject::ClassInstance(ci)) => {
                 let eval = value.accept(self)?;
-                let value = unwrap_to_object(eval).map_err(|e| e.with_place(property.view()))?;
+                let value =
+                    unwrap_to_object(eval).map_err(|e| e.with_place(property.position()))?;
                 ci.borrow_mut().set(property.name_str(), value);
                 Ok(Eval::new_nil())
             }
@@ -377,28 +416,28 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
         methods: &[ast::Function],
     ) -> EvalResult {
         let mut class_methods = HashMap::with_capacity(methods.len());
+        let mut static_methods = HashMap::with_capacity(methods.len());
         let mut init = None;
         for method in methods {
             // the parser should have already confirmed that this is safe.
             let name = method.name().unwrap().name_str().to_string();
             let func = Function::new(
                 self.current_scope.clone(),
-                method
-                    .params()
-                    .iter()
-                    .map(|p| p.name_str().to_string())
-                    .collect(),
+                method.param_strings(),
                 method.body(),
             );
 
+            // todo: parser should ensure that there are no "static" init functions.
             if name == "init" {
                 init.replace(LoxObject::from(func));
+            } else if method.is_static() {
+                static_methods.insert(name, LoxObject::from(func));
             } else {
                 class_methods.insert(name, LoxObject::from(func));
             }
         }
         let class_name = String::from(name.name_str());
-        let class = LoxObject::from(Class::new(class_name, class_methods, init));
+        let class = LoxObject::from(Class::new(class_name, class_methods, static_methods, init));
         self.bind(name, class.clone());
         Ok(Eval::Object(class))
     }
@@ -501,22 +540,22 @@ fn binary_op_error(
         _ => format!("cannot add '{}' + {}'", l.type_str(), r.type_str()),
     };
 
-    RuntimeError::from(LoxError::TypeError(msg)).with_place(op.view())
+    RuntimeError::from(LoxError::TypeError(msg)).with_place(op.position())
 }
 
 fn unary_prefix_error(l: &LoxObject, prefix: UnaryPrefix) -> RuntimeError {
     let msg = format!("invalid type {} for prefix {}", l.type_str(), prefix);
-    RuntimeError::from(LoxError::TypeError(msg)).with_place(prefix.view())
+    RuntimeError::from(LoxError::TypeError(msg)).with_place(prefix.position())
 }
 
 fn reference_error(ident: &Identifier) -> RuntimeError {
     let msg = format!("undeclared identifier '{}'", ident.name_str());
-    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.view())
+    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.position())
 }
 
 fn ref_error_prop_access(ident: &Identifier) -> RuntimeError {
     let msg = format!("undefined property '{}'", ident.name_str());
-    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.view())
+    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.position())
 }
 
 fn type_error(expected: &str, recieved: &str) -> RuntimeError {

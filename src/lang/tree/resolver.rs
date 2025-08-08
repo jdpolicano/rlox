@@ -50,7 +50,6 @@ impl Resolver {
             // Initially marked "not yet defined" so we catch self-initialization.
             scope.insert(name.to_string(), (slot, false));
         }
-        // must be global variable.
         Ok(())
     }
 
@@ -84,7 +83,7 @@ impl Resolver {
         None
     }
 
-    fn resolve_function(&mut self, t: FuncType, value: &Function) -> Result<(), String> {
+    fn resolve_function(&mut self, _: FuncType, value: &Function) -> Result<(), String> {
         // now we begin a scope for local vars.
         self.begin_scope();
         for param in value.params() {
@@ -139,7 +138,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
                 return Err(format!(
                     "Resolver error: cannot read '{}' in its own initializer {}",
                     name.name_str(),
-                    name.view()
+                    name.position()
                 ));
             }
             // Store the resolved metadata back into the AST node.
@@ -301,7 +300,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
         } else {
             return Err(format!(
                 "'this' cannot be used in the global scope {}",
-                ident.view()
+                ident.position()
             ));
         }
         Ok(())

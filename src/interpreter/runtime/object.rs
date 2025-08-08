@@ -61,6 +61,12 @@ impl From<(&str, &str)> for LoxObject {
     }
 }
 
+impl From<Rc<Function>> for LoxObject {
+    fn from(value: Rc<Function>) -> Self {
+        Self::Function(value)
+    }
+}
+
 impl From<Function> for LoxObject {
     fn from(value: Function) -> Self {
         Self::Function(Rc::new(value))

@@ -11,20 +11,31 @@ const DEFAULT_PROPERTY_HASH_SIZE: usize = 16;
 pub struct Class {
     name: String,
     methods: HashMap<String, LoxObject>,
+    statics: HashMap<String, LoxObject>,
     init: Option<LoxObject>,
 }
 
 impl Class {
-    pub fn new(name: String, methods: HashMap<String, LoxObject>, init: Option<LoxObject>) -> Self {
+    pub fn new(
+        name: String,
+        methods: HashMap<String, LoxObject>,
+        statics: HashMap<String, LoxObject>,
+        init: Option<LoxObject>,
+    ) -> Self {
         return Self {
             name,
             methods,
+            statics,
             init,
         };
     }
 
     pub fn get_method(&self, name: &str) -> Option<&LoxObject> {
         self.methods.get(name)
+    }
+
+    pub fn get_static(&self, name: &str) -> Option<&LoxObject> {
+        self.statics.get(name)
     }
 
     pub fn init(&self) -> Option<Rc<Function>> {

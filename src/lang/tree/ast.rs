@@ -1,6 +1,5 @@
 use super::error::ConversionError;
 use crate::lang::tokenizer::token::{Token, TokenType};
-use crate::lang::view::View;
 use crate::lang::visitor::Visitor;
 use std::cell::Cell;
 use std::fmt;
@@ -9,32 +8,32 @@ use std::rc::Rc;
 // "+"  | "-"  | "*" | "/" ;
 #[derive(Debug, Clone, Copy)]
 pub enum BinaryOperator {
-    Equal { view: View },
-    NotEqual { view: View },
-    Less { view: View },
-    LessEqual { view: View },
-    Greater { view: View },
-    GreaterEqual { view: View },
-    Plus { view: View },
-    Minus { view: View },
-    Star { view: View },
-    Slash { view: View },
+    Equal(usize),
+    NotEqual(usize),
+    Less(usize),
+    LessEqual(usize),
+    Greater(usize),
+    GreaterEqual(usize),
+    Plus(usize),
+    Minus(usize),
+    Star(usize),
+    Slash(usize),
 }
 
 impl TryFrom<Token<'_>> for BinaryOperator {
     type Error = ConversionError;
     fn try_from(value: Token<'_>) -> Result<Self, Self::Error> {
         match value.token_type {
-            TokenType::EqualEqual => Ok(BinaryOperator::Equal { view: value.pos }),
-            TokenType::BangEqual => Ok(BinaryOperator::NotEqual { view: value.pos }),
-            TokenType::Less => Ok(BinaryOperator::Less { view: value.pos }),
-            TokenType::LessEqual => Ok(BinaryOperator::LessEqual { view: value.pos }),
-            TokenType::Greater => Ok(BinaryOperator::Greater { view: value.pos }),
-            TokenType::GreaterEqual => Ok(BinaryOperator::GreaterEqual { view: value.pos }),
-            TokenType::Plus => Ok(BinaryOperator::Plus { view: value.pos }),
-            TokenType::Minus => Ok(BinaryOperator::Minus { view: value.pos }),
-            TokenType::Star => Ok(BinaryOperator::Star { view: value.pos }),
-            TokenType::Slash => Ok(BinaryOperator::Slash { view: value.pos }),
+            TokenType::EqualEqual => Ok(BinaryOperator::Equal(value.position)),
+            TokenType::BangEqual => Ok(BinaryOperator::NotEqual(value.position)),
+            TokenType::Less => Ok(BinaryOperator::Less(value.position)),
+            TokenType::LessEqual => Ok(BinaryOperator::LessEqual(value.position)),
+            TokenType::Greater => Ok(BinaryOperator::Greater(value.position)),
+            TokenType::GreaterEqual => Ok(BinaryOperator::GreaterEqual(value.position)),
+            TokenType::Plus => Ok(BinaryOperator::Plus(value.position)),
+            TokenType::Minus => Ok(BinaryOperator::Minus(value.position)),
+            TokenType::Star => Ok(BinaryOperator::Star(value.position)),
+            TokenType::Slash => Ok(BinaryOperator::Slash(value.position)),
             _ => {
                 return Err(ConversionError::InvalidBinaryOperator(value.into()));
             }
@@ -45,49 +44,48 @@ impl TryFrom<Token<'_>> for BinaryOperator {
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Equal { .. } => write!(f, "'=='"),
-            Self::NotEqual { .. } => write!(f, "'!='"),
-            Self::Less { .. } => write!(f, "'<'"),
-            Self::LessEqual { .. } => write!(f, "'<='"),
-            Self::Greater { .. } => write!(f, "'>'"),
-            Self::GreaterEqual { .. } => write!(f, "'>='"),
-            Self::Plus { .. } => write!(f, "'+'"),
-            Self::Minus { .. } => write!(f, "'-'"),
-            Self::Star { .. } => write!(f, "'*'"),
-            Self::Slash { .. } => write!(f, "'/'"),
+            Self::Equal(_) => write!(f, "'=='"),
+            Self::NotEqual(_) => write!(f, "'!='"),
+            Self::Less(_) => write!(f, "'<'"),
+            Self::LessEqual(_) => write!(f, "'<='"),
+            Self::Greater(_) => write!(f, "'>'"),
+            Self::GreaterEqual(_) => write!(f, "'>='"),
+            Self::Plus(_) => write!(f, "'+'"),
+            Self::Minus(_) => write!(f, "'-'"),
+            Self::Star(_) => write!(f, "'*'"),
+            Self::Slash(_) => write!(f, "'/'"),
         }
     }
 }
 
 impl BinaryOperator {
-    pub fn view(&self) -> View {
+    pub fn position(&self) -> usize {
         match self {
-            Self::Equal { view } => *view,
-            Self::NotEqual { view } => *view,
-            Self::Less { view } => *view,
-            Self::LessEqual { view } => *view,
-            Self::Greater { view } => *view,
-            Self::GreaterEqual { view } => *view,
-            Self::Plus { view } => *view,
-            Self::Minus { view } => *view,
-            Self::Star { view } => *view,
-            Self::Slash { view } => *view,
+            Self::Equal(view) => *view,
+            Self::NotEqual(view) => *view,
+            Self::Less(view) => *view,
+            Self::LessEqual(view) => *view,
+            Self::Greater(view) => *view,
+            Self::GreaterEqual(view) => *view,
+            Self::Plus(view) => *view,
+            Self::Minus(view) => *view,
+            Self::Star(view) => *view,
+            Self::Slash(view) => *view,
         }
     }
 }
-
 #[derive(Debug, Clone, Copy)]
 pub enum LogicalOperator {
-    And { view: View },
-    Or { view: View },
+    And(usize),
+    Or(usize),
 }
 
 impl TryFrom<Token<'_>> for LogicalOperator {
     type Error = ConversionError;
     fn try_from(value: Token<'_>) -> Result<Self, Self::Error> {
         match value.token_type {
-            TokenType::And => Ok(LogicalOperator::And { view: value.pos }),
-            TokenType::Or => Ok(LogicalOperator::Or { view: value.pos }),
+            TokenType::And => Ok(LogicalOperator::And(value.position)),
+            TokenType::Or => Ok(LogicalOperator::Or(value.position)),
             _ => {
                 return Err(ConversionError::InvalidLogicalOperator(value.into()));
             }
@@ -98,34 +96,35 @@ impl TryFrom<Token<'_>> for LogicalOperator {
 impl fmt::Display for LogicalOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::And { .. } => write!(f, "and'"),
-            Self::Or { .. } => write!(f, "'or'"),
+            Self::And(_) => write!(f, "'and'"),
+            Self::Or(_) => write!(f, "'or'"),
         }
     }
 }
 
 impl LogicalOperator {
-    pub fn view(&self) -> View {
+    pub fn position(&self) -> usize {
         match self {
-            Self::And { view } => *view,
-            Self::Or { view } => *view,
+            Self::And(view) => *view,
+            Self::Or(view) => *view,
         }
     }
 }
 
+//
 // "!" | "-" prefix
 #[derive(Debug, Clone, Copy)]
 pub enum UnaryPrefix {
-    Bang { view: View },
-    Minus { view: View },
+    Bang(usize),
+    Minus(usize),
 }
 
 impl TryFrom<Token<'_>> for UnaryPrefix {
     type Error = ConversionError;
     fn try_from(value: Token<'_>) -> Result<Self, Self::Error> {
         match value.token_type {
-            TokenType::Bang => Ok(UnaryPrefix::Bang { view: value.pos }),
-            TokenType::Minus => Ok(UnaryPrefix::Minus { view: value.pos }),
+            TokenType::Bang => Ok(UnaryPrefix::Bang(value.position)),
+            TokenType::Minus => Ok(UnaryPrefix::Minus(value.position)),
             _ => {
                 return Err(ConversionError::InvalidUnaryOperator(value.into()));
             }
@@ -136,47 +135,53 @@ impl TryFrom<Token<'_>> for UnaryPrefix {
 impl fmt::Display for UnaryPrefix {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Bang { .. } => write!(f, "'!'"),
-            Self::Minus { .. } => write!(f, "'-'"),
+            Self::Bang(_) => write!(f, "'!'"),
+            Self::Minus(_) => write!(f, "'-'"),
         }
     }
 }
 
 impl UnaryPrefix {
-    pub fn view(&self) -> View {
+    pub fn position(&self) -> usize {
         match self {
-            UnaryPrefix::Bang { view } => *view,
-            UnaryPrefix::Minus { view } => *view,
+            UnaryPrefix::Bang(pos) => *pos,
+            UnaryPrefix::Minus(pos) => *pos,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
-    Number { value: f64, view: View },
-    String { value: Rc<String>, view: View },
-    Boolean { value: bool, view: View },
-    Nil { view: View },
+    Number { value: f64, position: usize },
+    String { value: Rc<String>, position: usize },
+    Boolean { value: bool, position: usize },
+    Nil { position: usize },
 }
 
 impl Literal {
-    pub fn new_number(n: f64, v: View) -> Self {
-        Self::Number { value: n, view: v }
-    }
-
-    pub fn new_string(s: String, v: View) -> Self {
-        Self::String {
-            value: Rc::new(s),
-            view: v,
+    pub fn new_number(n: f64, v: usize) -> Self {
+        Self::Number {
+            value: n,
+            position: v,
         }
     }
 
-    pub fn new_boolean(b: bool, v: View) -> Self {
-        Self::Boolean { value: b, view: v }
+    pub fn new_string(s: String, v: usize) -> Self {
+        Self::String {
+            value: Rc::new(s),
+            position: v,
+        }
     }
 
-    pub fn new_nil(v: View) -> Self {
-        Self::Nil { view: v }
+    pub fn new_boolean(b: bool, v: usize) -> Self {
+        Self::Boolean {
+            value: b,
+            position: v,
+        }
+    }
+
+    pub fn new_nil(v: usize) -> Self {
+        Self::Nil { position: v }
     }
 }
 
@@ -189,19 +194,19 @@ impl TryFrom<Token<'_>> for Literal {
                 if num.is_err() {
                     Err(ConversionError::InvalidNumber(value.into()))
                 } else {
-                    Ok(Literal::new_number(num.unwrap(), value.pos))
+                    Ok(Literal::new_number(num.unwrap(), value.position))
                 }
             }
             TokenType::String => {
                 let end = value.lexeme.len() - 1;
                 Ok(Literal::new_string(
                     value.lexeme[1..end].to_string(),
-                    value.pos,
+                    value.position,
                 ))
             }
-            TokenType::True => Ok(Literal::new_boolean(true, value.pos)),
-            TokenType::False => Ok(Literal::new_boolean(false, value.pos)),
-            TokenType::Nil => Ok(Literal::new_nil(value.pos)),
+            TokenType::True => Ok(Literal::new_boolean(true, value.position)),
+            TokenType::False => Ok(Literal::new_boolean(false, value.position)),
+            TokenType::Nil => Ok(Literal::new_nil(value.position)),
             _ => {
                 return Err(ConversionError::InvalidLiteralType(value.into()));
             }
@@ -225,7 +230,7 @@ pub struct Identifier {
     name: String,
     slot: Cell<Option<usize>>,
     depth: Cell<Option<usize>>,
-    view: View,
+    position: usize,
 }
 
 impl Identifier {
@@ -233,8 +238,8 @@ impl Identifier {
         self.name.as_str()
     }
 
-    pub fn view(&self) -> View {
-        self.view
+    pub fn position(&self) -> usize {
+        self.position
     }
 
     pub fn swap_depth(&self, value: usize) {
@@ -277,7 +282,7 @@ impl TryFrom<Token<'_>> for Identifier {
             // location where it was declared.
             TokenType::Identifier | TokenType::Fun | TokenType::This => Ok(Self {
                 name: value.lexeme.to_string(),
-                view: value.pos,
+                position: value.position,
                 slot: Cell::new(None),
                 depth: Cell::new(None),
             }),
@@ -289,12 +294,19 @@ impl TryFrom<Token<'_>> for Identifier {
 #[derive(Debug)]
 pub struct Callee {
     pub expr: Box<Expr>,
-    pub view: View,
+    position: usize,
 }
 
 impl Callee {
-    pub fn view(&self) -> View {
-        self.view
+    pub fn new(expr: Expr, position: usize) -> Self {
+        Self {
+            expr: Box::new(expr),
+            position,
+        }
+    }
+
+    pub fn position(&self) -> usize {
+        self.position
     }
 }
 
@@ -303,31 +315,45 @@ pub struct Function {
     name: Option<Identifier>,
     params: Vec<Identifier>,
     body: Rc<Stmt>,
-    // marker view is the fallback location we'll point out
+    // marker position is the fallback location we'll point out
     // if we encounter an issue with this function.
-    // The default is the name of the function if its available.
-    marker_view: View,
+    // The default is the name of the function if its available, this helps
+    // handle anonymous functions.
+    marker_position: usize,
+    // this tells us whether or not the function is a static function, declared on the class instance itself.
+    is_static: bool,
 }
 
 impl Function {
-    pub fn with_view(mut self, v: View) -> Self {
-        self.marker_view = v;
+    pub fn with_position(mut self, position: usize) -> Self {
+        self.marker_position = position;
         self
     }
 
-    pub fn view(&self) -> View {
+    pub fn position(&self) -> usize {
         self.name
             .as_ref()
-            .map(|ident| ident.view())
-            .unwrap_or(self.marker_view)
+            .map(|ident| ident.position())
+            .unwrap_or(self.marker_position)
     }
 
     pub fn is_anonymous(&self) -> bool {
         self.name.is_none()
     }
 
+    pub fn is_static(&self) -> bool {
+        self.is_static
+    }
+
     pub fn params(&self) -> &[Identifier] {
         &self.params[..]
+    }
+
+    pub fn param_strings(&self) -> Vec<String> {
+        self.params()
+            .iter()
+            .map(|p| p.name_str().to_string())
+            .collect()
     }
 
     pub fn body(&self) -> Rc<Stmt> {
@@ -342,13 +368,15 @@ impl Function {
         name: Option<Identifier>,
         params: Vec<Identifier>,
         body: Rc<Stmt>,
-        marker_view: View,
+        marker_position: usize,
+        is_static: bool,
     ) -> Self {
         Self {
             name,
             params,
             body,
-            marker_view,
+            marker_position,
+            is_static,
         }
     }
 }

@@ -1,13 +1,12 @@
-use crate::lang::view::View;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum RuntimeError {
-    #[error("{reason} {place}")]
+    #[error("{reason}")]
     WithLocation {
         #[source]
         reason: LoxError,
-        place: View,
+        place: usize,
     },
     #[error("{reason}")]
     Without {
@@ -18,7 +17,7 @@ pub enum RuntimeError {
 }
 
 impl RuntimeError {
-    pub fn with_place(self, place: View) -> Self {
+    pub fn with_place(self, place: usize) -> Self {
         match self {
             Self::WithLocation { .. } => self, // you cannot mutate the location originally attached to it.
             Self::Without { reason } => Self::WithLocation { reason, place },

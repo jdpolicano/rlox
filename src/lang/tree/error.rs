@@ -1,6 +1,5 @@
 use crate::lang::tokenizer::error::ScanError;
 use crate::lang::tokenizer::token::{OwnedToken, TokenType};
-use crate::lang::view::View;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -32,18 +31,18 @@ pub enum ParseError {
         recieved: String,
         msg: &'static str,
     },
-    #[error("SyntaxError: cannot assign to type '{type_str}' {location}")]
-    UnexpectedAssignment { type_str: String, location: View },
-    #[error("SyntaxError: cannot use '{type_str}' out side of a loop {location}")]
-    InvalidLoopKeyword { type_str: String, location: View },
-    #[error("SyntaxError: cannot use 'return' out side of a function {location}")]
-    InvalidReturn { location: View },
-    #[error("SyntaxError: function arguments cannot exceed 255 {location}")]
-    FuncExceedMaxArgs { max: usize, location: View },
-    #[error("SyntaxError: invalid function statement {location}")]
-    InvalidFuncStatement { location: View },
-    #[error("SyntaxError: invalid class method {location}")]
-    InvalidClassMethod { location: View },
+    #[error("SyntaxError: cannot assign to type '{type_str}'")]
+    UnexpectedAssignment { type_str: String, location: usize },
+    #[error("SyntaxError: cannot use '{type_str}' out side of a loop")]
+    InvalidLoopKeyword { type_str: String, location: usize },
+    #[error("SyntaxError: cannot use 'return' out side of a function")]
+    InvalidReturn { location: usize },
+    #[error("SyntaxError: function arguments cannot exceed 255")]
+    FuncExceedMaxArgs { max: usize, location: usize },
+    #[error("SyntaxError: invalid function statement")]
+    InvalidFuncStatement { location: usize },
+    #[error("SyntaxError: invalid class method")]
+    InvalidClassMethod { location: usize },
     #[error("SyntaxError: unexpected end of file")]
     UnexpectedEof,
 }

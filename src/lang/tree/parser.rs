@@ -3,7 +3,6 @@ use super::error::ParseError;
 use crate::lang::tokenizer::scanner::Scanner;
 use crate::lang::tokenizer::token::{Token, TokenType};
 use crate::lang::tree::ast::{BinaryOperator, Callee, Function, Identifier, Literal, Stmt};
-use crate::lang::view::View;
 use std::iter::{Iterator, Peekable};
 use std::rc::Rc;
 
@@ -167,10 +166,11 @@ impl<'a> Parser<'a> {
             if t.is_err() || t.unwrap().token_type == TokenType::RightBrace {
                 break;
             }
-            let func = self.function(None)?;
+            let is_static = self.match_one(TokenType::Static).is_some();
+            let func = self.function(None, is_static)?;
             if func.is_anonymous() {
                 return Err(ParseError::InvalidClassMethod {
-                    location: func.view(),
+                    location: func.position(),
                 });
             }
             methods.push(func);
@@ -277,7 +277,7 @@ impl<'a> Parser<'a> {
         if !self.is_in_loop() {
             return Err(ParseError::InvalidLoopKeyword {
                 type_str: keyword.lexeme.to_string(),
-                location: keyword.pos,
+                location: keyword.position,
             });
         }
         self.expect("unterminated break statement", TokenType::Semicolon)?;
@@ -289,7 +289,7 @@ impl<'a> Parser<'a> {
         if !self.is_in_loop() {
             return Err(ParseError::InvalidLoopKeyword {
                 type_str: keyword.lexeme.to_string(),
-                location: keyword.pos,
+                location: keyword.position,
             });
         }
         self.expect("unterminated break statement", TokenType::Semicolon)?;
@@ -300,7 +300,7 @@ impl<'a> Parser<'a> {
         let keyword = self.tokens.last().unwrap();
         if !self.is_in_fn() {
             return Err(ParseError::InvalidReturn {
-                location: keyword.pos,
+                location: keyword.position,
             });
         }
 
@@ -369,7 +369,7 @@ impl<'a> Parser<'a> {
                 }),
                 _ => Err(ParseError::UnexpectedAssignment {
                     type_str: expr.type_str().to_string(),
-                    location: eq.pos,
+                    location: eq.position,
                 }),
             };
         }
@@ -385,7 +385,7 @@ impl<'a> Parser<'a> {
                 Expr::Variable { value: name } => desugar_op_assignment(name, eq, assign_value),
                 _ => Err(ParseError::UnexpectedAssignment {
                     type_str: expr.type_str().to_string(),
-                    location: eq.pos,
+                    location: eq.position,
                 }),
             };
         }
@@ -515,14 +515,11 @@ impl<'a> Parser<'a> {
         if args.len() > MAX_FUNC_ARGS {
             return Err(ParseError::FuncExceedMaxArgs {
                 max: MAX_FUNC_ARGS,
-                location: paren.pos,
+                location: paren.position,
             });
         }
         Ok(Expr::Call {
-            callee: Callee {
-                expr: Box::new(expr),
-                view: paren.pos,
-            },
+            callee: Callee::new(expr, paren.position),
             args,
         })
     }
@@ -583,7 +580,7 @@ impl<'a> Parser<'a> {
         }
 
         if let Some(fun) = self.match_one(TokenType::Fun) {
-            return self.fun_expression(fun.pos);
+            return self.fun_expression(fun.position);
         }
 
         if let Some(name) = self.match_one(TokenType::Identifier) {
@@ -603,14 +600,17 @@ impl<'a> Parser<'a> {
         Ok(Expr::Literal { value })
     }
 
-    fn fun_expression(&mut self, marker_location: View) -> Result<Expr, ParseError> {
+    fn fun_expression(&mut self, marker_location: usize) -> Result<Expr, ParseError> {
         Ok(Expr::Function {
-            value: self.function(Some(marker_location))?,
+            value: self.function(Some(marker_location), false)?,
         })
     }
 
-    fn function(&mut self, marker_location: Option<View>) -> Result<Function, ParseError> {
-        self.enter_fn();
+    fn function(
+        &mut self,
+        marker_location: Option<usize>,
+        is_static: bool,
+    ) -> Result<Function, ParseError> {
         // if the function is anonymous then there will be no identifier after it.
         let name = if let Some(t) = self.match_one(TokenType::Identifier) {
             Some(Identifier::try_from(t)?)
@@ -622,13 +622,15 @@ impl<'a> Parser<'a> {
         let params = self.parameters()?;
         // functions are required to be followed by a block scope, so we force this by doing a little look-ahead.
         let _ = self.expect("function must open to block scope", TokenType::LeftBrace)?;
+        self.enter_fn();
         let ret = Function::new(
             name,
             params,
             Rc::new(self.block_statement()?),
             // if the caller didn't already have a place to point
             // diagnostics, then we should default to whereever the args began.
-            marker_location.unwrap_or(begin_args.pos),
+            marker_location.unwrap_or(begin_args.position),
+            is_static,
         );
         self.exit_fn();
         Ok(ret)
@@ -715,12 +717,12 @@ impl<'a> Parser<'a> {
 }
 
 fn desugar_op_assignment(name: Identifier, op: Token<'_>, rhs: Expr) -> Result<Expr, ParseError> {
-    let view = op.pos;
+    let location = op.position;
     let op = match op.token_type {
-        TokenType::PlusEqual => BinaryOperator::Plus { view },
-        TokenType::MinusEqual => BinaryOperator::Minus { view },
-        TokenType::StarEqual => BinaryOperator::Star { view },
-        TokenType::SlashEqual => BinaryOperator::Slash { view },
+        TokenType::PlusEqual => BinaryOperator::Plus(location),
+        TokenType::MinusEqual => BinaryOperator::Minus(location),
+        TokenType::StarEqual => BinaryOperator::Star(location),
+        TokenType::SlashEqual => BinaryOperator::Slash(location),
         _ => unreachable!("desugar should already be confirmed to be of a discrete set."),
     };
     Ok(Expr::Assignment {
@@ -784,11 +786,11 @@ fn make_block_statement(stmts: Vec<Stmt>) -> Stmt {
 }
 
 fn make_true_expression() -> Expr {
-    // it is okay to make up the "view" here because it is synthetic and can never fail at runtime reasonably.
+    // it is okay to make up the "location" here because it is synthetic and can never fail at runtime reasonably.
     Expr::Literal {
         value: Literal::Boolean {
             value: true,
-            view: View::default(),
+            position: 0,
         },
     }
 }
