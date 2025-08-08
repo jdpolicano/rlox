@@ -1,9 +1,9 @@
-use super::eval::Eval;
-use super::object::LoxObject;
-use crate::interpreter::lox::Lox;
+use crate::interpreter::Lox;
 use crate::interpreter::runtime::error::LoxError;
 use crate::interpreter::runtime::error::NativeError;
 use crate::interpreter::runtime::error::RuntimeError;
+use crate::interpreter::runtime::eval::Eval;
+use crate::interpreter::runtime::object::LoxObject;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub type NativeFn = fn(&mut Lox, Vec<LoxObject>) -> Result<Eval, RuntimeError>;

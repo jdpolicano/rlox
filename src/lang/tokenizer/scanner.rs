@@ -2,7 +2,7 @@ use super::error::ScanError;
 use super::token::{Token, TokenType};
 use std::collections::HashMap;
 use std::iter::Peekable;
-use std::str::{CharIndices, Chars};
+use std::str::CharIndices;
 
 pub const LOX_KEYWORDS: &[(&str, TokenType)] = &[
     ("and", TokenType::And),

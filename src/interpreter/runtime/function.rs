@@ -1,4 +1,3 @@
-use super::class::ClassInstance;
 use super::object::LoxObject;
 use super::scope::Scope;
 use crate::lang::tree::ast::Stmt;

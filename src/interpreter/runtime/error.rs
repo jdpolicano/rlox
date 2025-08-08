@@ -55,6 +55,5 @@ pub enum NativeError {
 pub enum BinaryError {
     LeftSide,
     RightSide,
-    InvalidOperator,
     InvalidTypes,
 }

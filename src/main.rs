@@ -1,4 +1,4 @@
-use rloxv2::interpreter::lox::Lox;
+use rloxv2::interpreter::Lox;
 use rloxv2::lang::tree::parser::Parser;
 use rloxv2::lang::tree::resolver::Resolver;
 const INPUT: &str = r#"
@@ -16,9 +16,7 @@ class Int {
     }
 }
 
-Int.test();
-var i = Int(5);
-print "'" + i.string() + "'";
+a = "1";
 "#;
 
 fn main() {
