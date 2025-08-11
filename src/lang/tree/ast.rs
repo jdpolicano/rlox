@@ -518,6 +518,7 @@ pub enum Stmt {
 
     Class {
         name: Identifier,
+        super_class: Option<Expr>,
         methods: Vec<Function>,
     },
 
@@ -552,7 +553,11 @@ impl Stmt {
             Self::Break => v.visit_break_statement(),
             Self::Continue => v.visit_continue_statment(),
             Self::Return { value } => v.visit_return_statment(value.as_ref()),
-            Self::Class { name, methods } => v.visit_class_statement(name, methods),
+            Self::Class {
+                name,
+                super_class,
+                methods,
+            } => v.visit_class_statement(name, super_class.as_ref(), methods),
         }
     }
 

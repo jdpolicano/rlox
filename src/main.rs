@@ -1,42 +1,32 @@
-use rloxv2::interpreter::Lox;
-use rloxv2::lang::tree::parser::Parser;
-use rloxv2::lang::tree::resolver::Resolver;
+use rloxv2::bytecode::instruction::OpCode;
+use rloxv2::bytecode::memory::Memory;
+use rloxv2::bytecode::vm::VirtualMachine;
+use std::io::{self, BufWriter};
 const INPUT: &str = r#"
-class Int {
-    static test(n) {
-        print "static is working";
-    }
-
-    init(n) {
-        this.n = n;
-    }
-
-    string() {
-        return string(this.n);
-    }
+fun fib(n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
 }
 
-a = "1";
+var before = clock();
+print fib(40);
+var after = clock();
+print after - before;
 "#;
 
 fn main() {
-    let mut parser = Parser::new(&INPUT);
-    parser.parse();
-    if parser.had_errors() {
-        return;
+    let mut memory = Memory::new();
+
+    memory.push_constant_f64(10.0, 0);
+    for _ in 0..10_000_000 {
+        memory.push_opcode(OpCode::Negate, 0);
     }
-    let mut res = Resolver::new();
-    let mut lox = Lox::new();
-    let stmts = parser.take_statements();
-    for stmt in &stmts {
-        if let Err(e) = stmt.accept(&mut res) {
-            println!("{e}");
-            break;
-        }
+    memory.push_opcode(OpCode::Return, 0);
+    let mut vm = VirtualMachine::new(Some(memory));
+    match vm.interpret() {
+        Ok(_) => {}
+        Err(e) => println!("{e}"),
     }
-    if let Err(e) = lox.interpret(stmts) {
-        println!("{}", e);
-    };
 }
 
 // expression     → assignment ;

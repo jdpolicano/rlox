@@ -185,12 +185,15 @@ impl Visitor<EvalResult, Expr, Stmt> for Lox {
     fn visit_class_statement(
         &mut self,
         name: &Identifier,
+        super_class: Option<&Expr>,
         methods: &[ast::Function],
     ) -> EvalResult {
+        let super_class = self.get_super_class(super_class)?;
         let (class_methods, static_methods, init) = self.collect_class_methods(methods);
         let class_name = name.name_str().to_string();
-        let class = LoxObject::from(Class::new(class_name, class_methods, static_methods, init));
-        self.bind(name, class.clone());
-        Ok(Eval::Object(class))
+        let class = Class::new(class_name, class_methods, static_methods, super_class, init);
+        let obj = LoxObject::from(class);
+        self.bind(name, obj.clone());
+        Ok(Eval::Object(obj))
     }
 }

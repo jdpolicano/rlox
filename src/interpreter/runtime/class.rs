@@ -7,42 +7,50 @@ use std::rc::Rc;
 
 const DEFAULT_PROPERTY_HASH_SIZE: usize = 16;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Class {
     name: String,
-    methods: HashMap<String, LoxObject>,
-    statics: HashMap<String, LoxObject>,
-    init: Option<LoxObject>,
+    methods: HashMap<String, Rc<Function>>,
+    statics: HashMap<String, Rc<Function>>,
+    super_class: Option<Rc<Class>>,
+    init: Option<Rc<Function>>,
 }
 
 impl Class {
     pub fn new(
         name: String,
-        methods: HashMap<String, LoxObject>,
-        statics: HashMap<String, LoxObject>,
-        init: Option<LoxObject>,
+        methods: HashMap<String, Rc<Function>>,
+        statics: HashMap<String, Rc<Function>>,
+        super_class: Option<Rc<Class>>,
+        init: Option<Rc<Function>>,
     ) -> Self {
         return Self {
             name,
             methods,
             statics,
+            super_class,
             init,
         };
     }
 
-    pub fn get_method(&self, name: &str) -> Option<&LoxObject> {
-        self.methods.get(name)
+    pub fn get_method(&self, name: &str) -> Option<Rc<Function>> {
+        if let Some(method) = self.methods.get(name) {
+            return Some(method.clone());
+        }
+
+        if let Some(sc) = self.super_class.as_ref() {
+            return sc.get_method(name);
+        }
+
+        None
     }
 
-    pub fn get_static(&self, name: &str) -> Option<&LoxObject> {
-        self.statics.get(name)
+    pub fn get_static(&self, name: &str) -> Option<Rc<Function>> {
+        self.statics.get(name).map(|f| f.clone())
     }
 
     pub fn init(&self) -> Option<Rc<Function>> {
-        if let Some(LoxObject::Function(ref init)) = self.init {
-            return Some(init.clone());
-        }
-        None
+        self.init.clone()
     }
 }
 
@@ -70,10 +78,16 @@ impl ClassInstance {
         LoxObject::ClassInstance(Rc::new(RefCell::new(Self::new(constructor))))
     }
 
-    pub fn get(&self, prop: &str) -> Option<&LoxObject> {
-        self.properties
-            .get(prop)
-            .or(self.constructor.get_method(prop))
+    pub fn get(&self, prop: &str) -> Option<LoxObject> {
+        if let Some(obj) = self.properties.get(prop) {
+            return Some(obj.clone());
+        }
+
+        if let Some(func) = self.constructor.get_method(prop) {
+            return Some(func.into());
+        }
+
+        None
     }
 
     pub fn set(&mut self, prop: &str, value: LoxObject) -> Option<LoxObject> {

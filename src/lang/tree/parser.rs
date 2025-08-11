@@ -160,6 +160,15 @@ impl<'a> Parser<'a> {
             "class delcaration requires an identifier",
             TokenType::Identifier,
         )?;
+
+        let super_class = if let Some(less) = self.match_one(TokenType::Less) {
+            let parent = self.expect("class inheritance expects parent", TokenType::Identifier)?;
+            Some(Expr::Variable {
+                value: Identifier::try_from(parent)?,
+            })
+        } else {
+            None
+        };
         self.expect("class statement left brace", TokenType::LeftBrace)?;
         let mut methods = Vec::new();
         while let Some(t) = self.tokens.peek() {
@@ -178,6 +187,7 @@ impl<'a> Parser<'a> {
         self.expect("class statement right brace", TokenType::RightBrace)?;
         Ok(Stmt::Class {
             name: class_name.try_into()?,
+            super_class,
             methods,
         })
     }

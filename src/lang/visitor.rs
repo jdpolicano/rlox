@@ -31,5 +31,10 @@ pub trait Visitor<T, Expr, Stmt> {
     fn visit_break_statement(&mut self) -> T;
     fn visit_continue_statment(&mut self) -> T;
     fn visit_return_statment(&mut self, value: Option<&Expr>) -> T;
-    fn visit_class_statement(&mut self, name: &Identifier, methods: &[Function]) -> T;
+    fn visit_class_statement(
+        &mut self,
+        name: &Identifier,
+        super_class: Option<&Expr>,
+        methods: &[Function],
+    ) -> T;
 }

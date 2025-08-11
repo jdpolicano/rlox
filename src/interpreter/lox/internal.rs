@@ -143,10 +143,7 @@ impl Lox {
 
     pub fn handle_class_get(&mut self, class: Rc<Class>, property: &Identifier) -> EvalResult {
         if let Some(value) = class.get_static(property.name_str()) {
-            Ok(match value {
-                LoxObject::Function(func) => LoxObject::from(func.clone()).into(),
-                _ => value.clone().into(),
-            })
+            Ok(Eval::Object(LoxObject::Function(value)))
         } else {
             Err(ref_error_prop_access(property))
         }
@@ -223,9 +220,9 @@ impl Lox {
         &mut self,
         methods: &[ast::Function],
     ) -> (
-        HashMap<String, LoxObject>,
-        HashMap<String, LoxObject>,
-        Option<LoxObject>,
+        HashMap<String, Rc<Function>>,
+        HashMap<String, Rc<Function>>,
+        Option<Rc<Function>>,
     ) {
         let mut class_methods = HashMap::new();
         let mut static_methods = HashMap::new();
@@ -240,14 +237,29 @@ impl Lox {
             );
 
             if name == "init" {
-                init = Some(LoxObject::from(func));
+                init = Some(Rc::new(func));
             } else if method.is_static() {
-                static_methods.insert(name, LoxObject::from(func));
+                static_methods.insert(name, Rc::new(func));
             } else {
-                class_methods.insert(name, LoxObject::from(func));
+                class_methods.insert(name, Rc::new(func));
             }
         }
 
         (class_methods, static_methods, init)
+    }
+
+    pub fn get_super_class(
+        &mut self,
+        variable: Option<&Expr>,
+    ) -> Result<Option<Rc<Class>>, RuntimeError> {
+        if let Some(expr) = variable {
+            match expr.accept(self)? {
+                Eval::Object(LoxObject::Class(c)) => {
+                    return Ok(Some(c));
+                }
+                other => return Err(type_error("class declaration", other.type_str())),
+            }
+        }
+        Ok(None)
     }
 }

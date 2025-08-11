@@ -262,10 +262,27 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
     fn visit_class_statement(
         &mut self,
         name: &Identifier,
+        super_class: Option<&Expr>,
         methods: &[Function],
     ) -> Result<(), String> {
         self.declare(name)?;
         self.define(name);
+
+        if let Some(sup) = super_class {
+            match sup {
+                Expr::Variable { value } => {
+                    if value.name_str() == name.name_str() {
+                        return Err(format!(
+                            "super class cannot self reference subclass sub: {} super: {}",
+                            name.name_str(),
+                            value.name_str()
+                        ));
+                    }
+                }
+                _ => {}
+            }
+            sup.accept(self)?;
+        }
 
         self.begin_scope();
         self.put_str("this");

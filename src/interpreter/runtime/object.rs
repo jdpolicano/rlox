@@ -166,6 +166,13 @@ impl LoxObject {
         }
     }
 
+    pub fn is_class_dec(&self) -> bool {
+        match self {
+            LoxObject::Class { .. } => true,
+            _ => false,
+        }
+    }
+
     pub fn as_number(&self) -> Option<f64> {
         if let LoxObject::Primitive(Primitive::Number(n)) = self {
             Some(*n)
