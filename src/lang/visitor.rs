@@ -1,8 +1,8 @@
 use super::tree::ast::{
-    BinaryOperator, Expr, Identifier, Literal, LogicalOperator, Stmt, UnaryPrefix,
+    BinaryOperator, Callee, Function, Identifier, Literal, LogicalOperator, UnaryPrefix,
 };
 
-pub trait Visitor<T> {
+pub trait Visitor<T, Expr, Stmt> {
     // expressions
     fn visit_binary(&mut self, left: &Expr, op: BinaryOperator, right: &Expr) -> T;
     fn visit_logical(&mut self, left: &Expr, op: LogicalOperator, right: &Expr) -> T;
@@ -11,6 +11,11 @@ pub trait Visitor<T> {
     fn visit_unary(&mut self, prefix: UnaryPrefix, expr: &Expr) -> T;
     fn visit_variable(&mut self, name: &Identifier) -> T;
     fn visit_assignment(&mut self, name: &Identifier, value: &Expr) -> T;
+    fn visit_call(&mut self, callee: &Callee, args: &[Expr]) -> T;
+    fn visit_function(&mut self, value: &Function) -> T;
+    fn visit_get(&mut self, object: &Expr, property: &Identifier) -> T;
+    fn visit_set(&mut self, object: &Expr, property: &Identifier, value: &Expr) -> T;
+    fn visit_this(&mut self, ident: &Identifier) -> T;
     // statments
     fn visit_expression_statement(&mut self, expr: &Expr) -> T;
     fn visit_print_statement(&mut self, expr: &Expr) -> T;
@@ -23,6 +28,13 @@ pub trait Visitor<T> {
         else_block: Option<&Stmt>,
     ) -> T;
     fn visit_while_statement(&mut self, condition: &Expr, block: &Stmt) -> T;
-    fn visit_break(&mut self) -> T;
-    fn visit_continue(&mut self) -> T;
+    fn visit_break_statement(&mut self) -> T;
+    fn visit_continue_statment(&mut self) -> T;
+    fn visit_return_statment(&mut self, value: Option<&Expr>) -> T;
+    fn visit_class_statement(
+        &mut self,
+        name: &Identifier,
+        super_class: Option<&Expr>,
+        methods: &[Function],
+    ) -> T;
 }

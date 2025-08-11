@@ -1,25 +1,31 @@
-use rloxv2::interpreter::lox::Lox;
-use rloxv2::lang::tree::parser::Parser;
+use rloxv2::bytecode::instruction::OpCode;
+use rloxv2::bytecode::memory::Memory;
+use rloxv2::bytecode::vm::VirtualMachine;
+use std::io::{self, BufWriter};
 const INPUT: &str = r#"
-var i = 0;
-while(i < 1000000) {
-    print i;
+fun fib(n) {
+  if (n < 2) return n;
+  return fib(n - 1) + fib(n - 2);
 }
+
+var before = clock();
+print fib(40);
+var after = clock();
+print after - before;
 "#;
 
 fn main() {
-    let mut parser = Parser::new(&INPUT);
-    parser.parse();
-    if parser.had_errors() {
-        //println!("{:#?}", parser.take_statements());
-        return;
+    let mut memory = Memory::new();
+
+    memory.push_constant_f64(10.0, 0);
+    for _ in 0..10_000_000 {
+        memory.push_opcode(OpCode::Negate, 0);
     }
-    let mut lox = Lox::new();
-    match lox.interpret(parser.take_statements()) {
-        Err(e) => {
-            println!("{}", e)
-        }
-        _ => {}
+    memory.push_opcode(OpCode::Return, 0);
+    let mut vm = VirtualMachine::new(Some(memory));
+    match vm.interpret() {
+        Ok(_) => {}
+        Err(e) => println!("{e}"),
     }
 }
 

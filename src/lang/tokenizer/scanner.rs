@@ -1,9 +1,8 @@
 use super::error::ScanError;
 use super::token::{Token, TokenType};
-use crate::lang::view::View;
 use std::collections::HashMap;
 use std::iter::Peekable;
-use std::str::Chars;
+use std::str::CharIndices;
 
 pub const LOX_KEYWORDS: &[(&str, TokenType)] = &[
     ("and", TokenType::And),
@@ -24,19 +23,14 @@ pub const LOX_KEYWORDS: &[(&str, TokenType)] = &[
     ("while", TokenType::While),
     ("break", TokenType::Break),
     ("continue", TokenType::Continue),
+    ("static", TokenType::Static),
 ];
-
-#[derive(Clone, Copy)]
-struct Location {
-    pub index: usize,
-    pub position: View,
-}
 
 pub struct Scanner<'src> {
     src: &'src str,
-    ci: Peekable<Chars<'src>>,
-    marker: Location,  // marker at token start
-    current: Location, // current location
+    ci: Peekable<CharIndices<'src>>,
+    marker: usize,  // marker at token start
+    current: usize, // current location
     keywords: HashMap<&'static str, TokenType>,
     iter_done: bool,
 }
@@ -45,15 +39,9 @@ impl<'src> Scanner<'src> {
     pub fn new(src: &'src str) -> Self {
         Self {
             src,
-            ci: src.chars().peekable(),
-            marker: Location {
-                index: 0,
-                position: View::new(0, 0),
-            },
-            current: Location {
-                index: 0,
-                position: View::new(0, 0),
-            },
+            ci: src.char_indices().peekable(),
+            marker: 0,
+            current: 0,
             keywords: make_keyword_map(),
             iter_done: false,
         }
@@ -218,28 +206,21 @@ impl<'src> Scanner<'src> {
     fn skip_ws_and_comments(&mut self) {
         loop {
             // whitespace
-            while let Some(c) = self.ci.next_if(|c| c.is_whitespace()) {
-                self.update_pos(c);
-            }
+            while let Some(_) = self.next_char_if(|c| c.is_whitespace()) {}
             // line comment
             if self.in_comment() {
-                // consume "//"
-                let _ = self.next_char();
-                let _ = self.next_char();
                 // consume until newline
+                // once we hit a newline, the whitespace loop at the top will cut it off.
                 while let Some(_) = self.next_char_if(|c| *c != '\n') {}
-                continue;
+            } else {
+                break;
             }
-            break;
         }
     }
 
     #[inline]
     fn in_comment(&self) -> bool {
-        self.src
-            .as_bytes()
-            .get(self.current.index..self.current.index + 2)
-            == Some(b"//")
+        self.src.as_bytes().get(self.current..self.current + 2) == Some(b"//")
     }
 
     #[inline]
@@ -249,18 +230,18 @@ impl<'src> Scanner<'src> {
 
     #[inline]
     fn peek(&mut self) -> Option<&char> {
-        self.ci.peek()
+        self.ci.peek().map(|(_, c)| c)
     }
 
     #[inline]
     fn peek_is_digit(&mut self) -> bool {
-        self.ci.peek().map_or(false, |c| c.is_ascii_digit())
+        self.ci.peek().map_or(false, |(_, c)| c.is_ascii_digit())
     }
 
     fn next_char(&mut self) -> Option<char> {
         self.ci.next().map(|ch| {
             self.update_pos(ch);
-            return ch;
+            return ch.1;
         })
     }
 
@@ -268,22 +249,16 @@ impl<'src> Scanner<'src> {
     where
         F: FnOnce(&char) -> bool,
     {
-        if let Some(c) = self.ci.next_if(f) {
+        if let Some(c) = self.ci.next_if(|(_, c)| f(c)) {
             self.update_pos(c);
-            Some(c)
+            Some(c.1)
         } else {
             None
         }
     }
 
-    fn update_pos(&mut self, c: char) {
-        if c == '\n' {
-            self.current.position.line += 1;
-            self.current.position.column = 0;
-        } else {
-            self.current.position.column += 1;
-        }
-        self.current.index += c.len_utf8();
+    fn update_pos(&mut self, (idx, c): (usize, char)) {
+        self.current = idx + c.len_utf8()
     }
 
     fn set_marker(&mut self) {
@@ -291,26 +266,23 @@ impl<'src> Scanner<'src> {
     }
 
     fn take_slice(&mut self) -> &'src str {
-        debug_assert!(
-            self.marker.index <= self.current.index,
-            "marker crossed index"
-        );
-        &self.src[self.marker.index..self.current.index]
+        debug_assert!(self.marker <= self.current, "marker crossed index");
+        &self.src[self.marker..self.current]
     }
 
     #[inline]
-    fn make_token(&mut self, kind: TokenType, lex: &'src str, pos: View) -> Token<'src> {
-        Token::new(kind, lex, pos)
+    fn make_token(&mut self, kind: TokenType, lex: &'src str, position: usize) -> Token<'src> {
+        Token::new(kind, lex, position)
     }
 
     #[inline]
-    fn position_now(&self) -> View {
-        self.current.position
+    fn position_now(&self) -> usize {
+        self.current
     }
 
     #[inline]
-    fn position_start(&self) -> View {
-        self.marker.position
+    fn position_start(&self) -> usize {
+        self.marker
     }
 }
 
