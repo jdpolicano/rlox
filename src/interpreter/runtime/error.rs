@@ -1,27 +1,17 @@
+use crate::lang::tokenizer::span::Span;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum RuntimeError {
-    #[error("{reason}")]
-    WithLocation {
-        #[source]
-        reason: LoxError,
-        place: usize,
-    },
-    #[error("{reason}")]
-    Without {
-        #[from]
-        #[source]
-        reason: LoxError,
-    },
+#[error("{reason}")]
+pub struct RuntimeError {
+    #[source]
+    reason: LoxError,
+    place: Span,
 }
 
 impl RuntimeError {
-    pub fn with_place(self, place: usize) -> Self {
-        match self {
-            Self::WithLocation { .. } => self, // you cannot mutate the location originally attached to it.
-            Self::Without { reason } => Self::WithLocation { reason, place },
-        }
+    pub fn new(reason: LoxError, place: Span) -> Self {
+        Self { reason, place }
     }
 }
 

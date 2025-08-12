@@ -1,4 +1,5 @@
 use super::error::ScanError;
+use super::span::Span;
 use super::token::{Token, TokenType};
 use std::collections::HashMap;
 use std::iter::Peekable;
@@ -160,7 +161,7 @@ impl<'src> Scanner<'src> {
                 if !self.peek_is_digit() {
                     return Err(ScanError::InvalidNumber(
                         self.take_slice().to_string(),
-                        self.position_start(),
+                        Span::new(self.marker, self.current),
                     ));
                 }
 
@@ -193,7 +194,7 @@ impl<'src> Scanner<'src> {
 
         Err(ScanError::StrMissingTerminator(
             self.take_slice().to_string(),
-            self.position_now(),
+            Span::new(self.marker, self.current),
         ))
     }
 

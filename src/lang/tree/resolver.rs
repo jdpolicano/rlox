@@ -58,8 +58,7 @@ impl Resolver {
         let depth = self.scopes.len();
         if let Some(scope) = self.scopes.last_mut() {
             if let Some((slot, is_defined)) = scope.get_mut(name.name_str()) {
-                name.swap_depth(depth);
-                name.swap_slot(*slot);
+                name.set_local_binding(depth, *slot);
                 *is_defined = true;
             }
         }
@@ -116,7 +115,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
         match expr {
             // named functions can refer to themselves recursively. so we need to define it before
             // we evaluate its body.
-            Expr::Function { value } if !value.is_anonymous() => {
+            Expr::Function { value, .. } if !value.is_anonymous() => {
                 self.define(ident);
                 expr.accept(self)?;
                 return Ok(());
@@ -136,14 +135,13 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
             // If it’s in our current scope (depth==0) but not yet defined, that’s an error.
             if depth == 0 && !is_defined {
                 return Err(format!(
-                    "Resolver error: cannot read '{}' in its own initializer {}",
+                    "Resolver error: cannot read '{}' in its own initializer {:?}",
                     name.name_str(),
-                    name.position()
+                    name.span()
                 ));
             }
             // Store the resolved metadata back into the AST node.
-            name.swap_depth(depth);
-            name.swap_slot(slot);
+            name.set_local_binding(depth, slot);
         }
         // Otherwise it's a global—interpreter will handle or error later.
         Ok(())
@@ -159,8 +157,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
         // now figure out if the target is a local or global var
         if let Some((depth, (slot, _))) = self.resolve_local(name.name_str()) {
             // Store the resolved metadata back into the AST node if it was a local var.
-            name.swap_depth(depth);
-            name.swap_slot(slot);
+            name.set_local_binding(depth, slot);
         }
         Ok(())
     }
@@ -270,7 +267,7 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
 
         if let Some(sup) = super_class {
             match sup {
-                Expr::Variable { value } => {
+                Expr::Variable { value, .. } => {
                     if value.name_str() == name.name_str() {
                         return Err(format!(
                             "super class cannot self reference subclass sub: {} super: {}",
@@ -293,14 +290,14 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
         Ok(())
     }
 
-    fn visit_get(&mut self, object: &Expr, _property: &Identifier) -> Result<(), String> {
+    fn visit_get(&mut self, object: &Expr, _property: &PropertyName) -> Result<(), String> {
         object.accept(self)
     }
 
     fn visit_set(
         &mut self,
         object: &Expr,
-        _property: &Identifier,
+        _property: &PropertyName,
         value: &Expr,
     ) -> Result<(), String> {
         object.accept(self)?;
@@ -312,12 +309,11 @@ impl Visitor<Result<(), String>, Expr, Stmt> for Resolver {
         // now figure out if the target is a local or global var
         if let Some((depth, (slot, _))) = self.resolve_local(ident.name_str()) {
             // Store the resolved metadata back into the AST node if it was a local var.
-            ident.swap_depth(depth);
-            ident.swap_slot(slot);
+            ident.set_local_binding(depth, slot);
         } else {
             return Err(format!(
-                "'this' cannot be used in the global scope {}",
-                ident.position()
+                "'this' cannot be used in the global scope {:?}",
+                ident.span()
             ));
         }
         Ok(())

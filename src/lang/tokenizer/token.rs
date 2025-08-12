@@ -1,5 +1,7 @@
 use std::fmt;
 
+use crate::lang::tokenizer::span::Span;
+
 #[derive(Clone, Debug, PartialEq, Copy)]
 pub enum TokenType {
     // Single-character tokens.
@@ -117,7 +119,7 @@ impl fmt::Display for TokenType {
 pub struct Token<'src> {
     pub token_type: TokenType,
     pub lexeme: &'src str,
-    pub position: usize,
+    pub span: Span,
 }
 
 impl<'src> fmt::Display for Token<'src> {
@@ -127,11 +129,11 @@ impl<'src> fmt::Display for Token<'src> {
 }
 
 impl<'src> Token<'src> {
-    pub fn new(token_type: TokenType, lexeme: &'src str, position: usize) -> Token<'src> {
+    pub fn new(token_type: TokenType, lexeme: &'src str, start: usize) -> Token<'src> {
         Token {
             token_type,
             lexeme,
-            position,
+            span: Span::new(start, start + lexeme.len()),
         }
     }
 }
@@ -140,7 +142,7 @@ impl<'src> Token<'src> {
 pub struct OwnedToken {
     pub token_type: TokenType,
     pub lexeme: String,
-    pub position: usize,
+    pub span: Span,
 }
 
 impl fmt::Display for OwnedToken {
@@ -150,17 +152,18 @@ impl fmt::Display for OwnedToken {
 }
 
 impl OwnedToken {
-    pub fn new(token_type: TokenType, lexeme: String, position: usize) -> Self {
+    pub fn new(token_type: TokenType, lexeme: String, start: usize) -> Self {
+        let end = start + lexeme.len();
         Self {
             token_type,
             lexeme,
-            position,
+            span: Span::new(start, end),
         }
     }
 }
 
 impl<'a> From<Token<'a>> for OwnedToken {
     fn from(value: Token<'a>) -> Self {
-        Self::new(value.token_type, value.lexeme.to_string(), value.position)
+        Self::new(value.token_type, value.lexeme.to_string(), value.span.start)
     }
 }

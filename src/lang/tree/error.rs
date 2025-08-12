@@ -1,8 +1,9 @@
 use crate::lang::tokenizer::error::ScanError;
+use crate::lang::tokenizer::span::Span;
 use crate::lang::tokenizer::token::{OwnedToken, TokenType};
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum ConversionError {
     #[error("Invalid binary operator conversion {0}")]
     InvalidBinaryOperator(OwnedToken),
@@ -19,7 +20,7 @@ pub enum ConversionError {
 }
 
 // todo: fill this out.s
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum ParseError {
     #[error("{0}")]
     ScanError(#[from] ScanError),
@@ -30,19 +31,52 @@ pub enum ParseError {
         expected: TokenType,
         recieved: String,
         msg: &'static str,
+        span: Span,
     },
     #[error("SyntaxError: cannot assign to type '{type_str}'")]
-    UnexpectedAssignment { type_str: String, location: usize },
+    UnexpectedAssignment { type_str: String, span: Span },
     #[error("SyntaxError: cannot use '{type_str}' out side of a loop")]
-    InvalidLoopKeyword { type_str: String, location: usize },
+    InvalidLoopKeyword { type_str: String, span: Span },
     #[error("SyntaxError: cannot use 'return' out side of a function")]
-    InvalidReturn { location: usize },
+    InvalidReturn { span: Span },
     #[error("SyntaxError: function arguments cannot exceed 255")]
-    FuncExceedMaxArgs { max: usize, location: usize },
+    FuncExceedMaxArgs { max: usize, span: Span },
     #[error("SyntaxError: invalid function statement")]
-    InvalidFuncStatement { location: usize },
+    InvalidFuncStatement { span: Span },
     #[error("SyntaxError: invalid class method")]
-    InvalidClassMethod { location: usize },
+    InvalidClassMethod { span: Span },
     #[error("SyntaxError: unexpected end of file")]
     UnexpectedEof,
+}
+
+impl ParseError {
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Self::FuncExceedMaxArgs { span, .. } => Some(*span),
+            Self::InvalidClassMethod { span } => Some(*span),
+            Self::InvalidFuncStatement { span } => Some(*span),
+            Self::InvalidLoopKeyword { span, .. } => Some(*span),
+            Self::InvalidReturn { span } => Some(*span),
+            Self::UnexpectedAssignment { span, .. } => Some(*span),
+            Self::UnexpectedToken { span, .. } => Some(*span),
+            _ => None,
+        }
+    }
+    pub fn print_code_block(&self, src: &str) {
+        if let Some(span) = self.span() {
+            let mut line_cnt = 0;
+            let mut line_begin = 0;
+            let idx = 0;
+            for (i, ch) in src.char_indices() {
+                if i >= span.start {
+                    break;
+                }
+                if ch == '\n' {
+                    line_cnt += 1;
+                    line_begin = i + 1;
+                }
+            }
+            println!("{line_cnt}  |   {}", &src[line_begin..span.end]);
+        }
+    }
 }

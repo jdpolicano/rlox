@@ -1,3 +1,4 @@
+use crate::bytecode::error::{BinOpError, BinOpSide, ErrorObject, LoxError, TypeError};
 use std::{
     fmt,
     ops::{Add, Div, Mul, Neg, Sub},
@@ -6,14 +7,20 @@ use std::{
 #[derive(Debug, Clone)]
 pub enum LoxObject {
     Number(f64),
-    Error(String),
+    Error(Box<ErrorObject>),
+}
+
+impl LoxObject {
+    pub fn binop_error(op_err: BinOpError) -> Self {
+        Self::Error(Box::new(ErrorObject::from(op_err)))
+    }
 }
 
 impl fmt::Display for LoxObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Number(n) => write!(f, "{}", n),
-            Self::Error(e) => write!(f, "ERROR: {}", e),
+            Self::Error(e) => write!(f, "{}", e),
         }
     }
 }
@@ -23,7 +30,10 @@ impl Add for LoxObject {
     fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Self::Number(a), Self::Number(b)) => Self::Number(a + b),
-            _ => Self::Error("Cannot add non-number types".to_string()),
+            (Self::Number(_), _) => {
+                LoxObject::binop_error(BinOpError::AddOpFailure(BinOpSide::Rhs))
+            }
+            _ => LoxObject::binop_error(BinOpError::AddOpFailure(BinOpSide::Lhs)),
         }
     }
 }
@@ -33,7 +43,10 @@ impl Sub for LoxObject {
     fn sub(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Self::Number(a), Self::Number(b)) => Self::Number(a - b),
-            _ => Self::Error("Cannot subtract non-number types".to_string()),
+            (Self::Number(_), _) => {
+                LoxObject::binop_error(BinOpError::SubOpFailure(BinOpSide::Rhs))
+            }
+            _ => LoxObject::binop_error(BinOpError::SubOpFailure(BinOpSide::Lhs)),
         }
     }
 }
@@ -43,7 +56,10 @@ impl Mul for LoxObject {
     fn mul(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
             (Self::Number(a), Self::Number(b)) => Self::Number(a * b),
-            _ => Self::Error("Cannot multiply non-number types".to_string()),
+            (Self::Number(_), _) => {
+                LoxObject::binop_error(BinOpError::MulOpFailure(BinOpSide::Rhs))
+            }
+            _ => LoxObject::binop_error(BinOpError::MulOpFailure(BinOpSide::Lhs)),
         }
     }
 }
@@ -54,12 +70,15 @@ impl Div for LoxObject {
         match (self, rhs) {
             (Self::Number(a), Self::Number(b)) => {
                 if b == 0.0 {
-                    Self::Error("Division by zero".to_string())
+                    LoxObject::binop_error(BinOpError::DivByZero)
                 } else {
                     Self::Number(a / b)
                 }
             }
-            _ => Self::Error("Cannot divide non-number types".to_string()),
+            (Self::Number(_), _) => {
+                LoxObject::binop_error(BinOpError::DivOpFailure(BinOpSide::Rhs))
+            }
+            _ => LoxObject::binop_error(BinOpError::DivOpFailure(BinOpSide::Lhs)),
         }
     }
 }
@@ -69,7 +88,7 @@ impl Neg for LoxObject {
     fn neg(self) -> Self::Output {
         match self {
             Self::Number(n) => Self::Number(-n),
-            _ => Self::Error("Cannot convert to a number".to_string()),
+            _ => LoxObject::binop_error(BinOpError::NegOpFailure),
         }
     }
 }

@@ -1,7 +1,7 @@
 use crate::interpreter::runtime::error::{BinaryError, LoxError, RuntimeError};
 use crate::interpreter::runtime::eval::Eval;
 use crate::interpreter::runtime::object::LoxObject;
-use crate::lang::tree::ast::{BinaryOperator, Identifier, UnaryPrefix};
+use crate::lang::tree::ast::{BinaryOperator, Identifier, PropertyName, UnaryPrefix};
 
 pub fn unary_op(value: &LoxObject, op: UnaryPrefix) -> Result<LoxObject, BinaryError> {
     match op {
@@ -84,33 +84,41 @@ pub fn binary_op_error(
         _ => format!("cannot add '{}' + {}'", l.type_str(), r.type_str()),
     };
 
-    RuntimeError::from(LoxError::TypeError(msg)).with_place(op.position())
+    RuntimeError::new(LoxError::TypeError(msg), op.span())
 }
 
 pub fn unary_prefix_error(l: &LoxObject, prefix: UnaryPrefix) -> RuntimeError {
     let msg = format!("invalid type {} for prefix {}", l.type_str(), prefix);
-    RuntimeError::from(LoxError::TypeError(msg)).with_place(prefix.position())
+    RuntimeError::new(LoxError::TypeError(msg), prefix.span())
 }
 
 pub fn reference_error(ident: &Identifier) -> RuntimeError {
     let msg = format!("undeclared identifier '{}'", ident.name_str());
-    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.position())
+    RuntimeError::new(LoxError::ReferenceError(msg), ident.span())
 }
 
-pub fn ref_error_prop_access(ident: &Identifier) -> RuntimeError {
+pub fn ref_error_prop_access(ident: &PropertyName) -> RuntimeError {
     let msg = format!("undefined property '{}'", ident.name_str());
-    RuntimeError::from(LoxError::ReferenceError(msg)).with_place(ident.position())
+    RuntimeError::new(LoxError::ReferenceError(msg), ident.span())
 }
 
-pub fn type_error(expected: &str, received: &str) -> RuntimeError {
+pub fn ref_error_prop_not_obj(ident: &PropertyName, t: &str) -> RuntimeError {
+    let msg = format!(
+        "cannont access property '{}' of non object type '{}'",
+        ident.name_str(),
+        t
+    );
+    RuntimeError::new(LoxError::ReferenceError(msg), ident.span())
+}
+
+pub fn type_error(expected: &str, received: &str) -> LoxError {
     LoxError::TypeError(format!(
         "expected type '{}' but received {}",
         expected, received
     ))
-    .into()
 }
 
-pub fn unwrap_to_object(eval: Eval) -> Result<LoxObject, RuntimeError> {
+pub fn unwrap_to_object(eval: Eval) -> Result<LoxObject, LoxError> {
     match eval {
         Eval::Object(obj) => Ok(obj),
         _ => Err(type_error("object", eval.type_str())),

@@ -1,7 +1,6 @@
 use crate::bytecode::instruction::OpCode;
 use crate::bytecode::memory::Memory;
 use crate::bytecode::object::LoxObject;
-use std::any::Any;
 use std::ops::Neg;
 
 macro_rules! binary_op {

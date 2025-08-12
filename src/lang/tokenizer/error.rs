@@ -1,3 +1,4 @@
+use super::span::Span;
 use thiserror::Error;
 
 #[derive(Error, Debug, Clone)]
@@ -7,7 +8,7 @@ pub enum ScanError {
     #[error("ScanError: token is invalid '{0}'")]
     InvalidToken(String, usize),
     #[error("ScanError: string literal is missing terminator")]
-    StrMissingTerminator(String, usize),
+    StrMissingTerminator(String, Span),
     #[error("ScanError: invalid number '{0}'")]
-    InvalidNumber(String, usize),
+    InvalidNumber(String, Span),
 }

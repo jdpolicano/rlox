@@ -32,24 +32,26 @@ impl From<io::Error> for MemoryError {
 /// RAM, and constants.
 pub struct Memory {
     // the src code as u8s (can be cast to opcodes)
-    code_src: Vec<u8>,
-    // the line info, run-length encoded.
-    code_lines: Vec<(usize, usize)>,
+    text: Vec<u8>,
+    // the line info for the test segement, run-length encoded.
+    lines: Vec<(usize, usize)>,
+    // the operating stack
     stack: Vec<LoxObject>,
+    // the program constants
     constants: Vec<LoxObject>,
 }
 
 impl Memory {
     #[inline]
     pub fn code_len(&self) -> usize {
-        self.code_src.len()
+        self.text.len()
     }
 
     #[inline]
     pub fn new() -> Self {
         Self {
-            code_src: Vec::new(),
-            code_lines: Vec::new(),
+            text: Vec::new(),
+            lines: Vec::new(),
             stack: Vec::new(),
             constants: Vec::new(),
         }
@@ -57,45 +59,45 @@ impl Memory {
 
     #[inline]
     fn code_is_empty(&self) -> bool {
-        self.code_src.is_empty()
+        self.text.is_empty()
     }
 
     #[inline]
     fn code_get(&self, loc: usize) -> u8 {
         debug_assert!(
-            loc < self.code_src.len(),
+            loc < self.text.len(),
             "index would go out of bounds on code segment"
         );
-        self.code_src[loc]
+        self.text[loc]
     }
 
     #[inline]
     fn code_push_u8(&mut self, v: u8, line: usize) {
-        self.code_src.push(v);
-        if let Some((l, cnt)) = self.code_lines.last_mut() {
+        self.text.push(v);
+        if let Some((l, cnt)) = self.lines.last_mut() {
             if line == *l {
                 *cnt += 1;
                 return;
             }
         }
-        self.code_lines.push((line, 1));
+        self.lines.push((line, 1));
     }
 
     #[inline]
     fn code_push_slice(&mut self, v: &[u8], line: usize) {
-        self.code_src.extend_from_slice(v);
-        if let Some((l, cnt)) = self.code_lines.last_mut() {
+        self.text.extend_from_slice(v);
+        if let Some((l, cnt)) = self.lines.last_mut() {
             if line == *l {
                 *cnt += v.len();
                 return;
             }
         }
-        self.code_lines.push((line, v.len()));
+        self.lines.push((line, v.len()));
     }
 
     fn code_get_line(&self, instruction_idx: usize) -> LineInfo {
         let mut count = 0;
-        for (line, n) in &self.code_lines {
+        for (line, n) in &self.lines {
             if count <= instruction_idx && instruction_idx < count + n {
                 return if count == instruction_idx {
                     LineInfo {
@@ -205,10 +207,10 @@ impl Memory {
     #[inline]
     pub fn fetch_u16(&self, loc: usize) -> u16 {
         debug_assert!(
-            loc + 1 < self.code_src.len(),
+            loc + 1 < self.text.len(),
             "index would go out of bounds on code segment for u16"
         );
-        u16::from_be_bytes([self.code_src[loc], self.code_src[loc + 1]])
+        u16::from_be_bytes([self.text[loc], self.text[loc + 1]])
     }
 
     /// Efficiently fetches a u16 value from the code memory at the specified location and converts to usize
@@ -218,10 +220,10 @@ impl Memory {
     #[inline]
     pub fn fetch_u16_usize(&self, loc: usize) -> usize {
         debug_assert!(
-            loc + 1 < self.code_src.len(),
+            loc + 1 < self.text.len(),
             "index would go out of bounds on code segment for u16"
         );
-        u16::from_be_bytes([self.code_src[loc], self.code_src[loc + 1]]) as usize
+        u16::from_be_bytes([self.text[loc], self.text[loc + 1]]) as usize
     }
 
     /// Formats the line prefix for debugging.
@@ -291,7 +293,7 @@ impl Memory {
         }
         println!("=======begin dump=======");
         let mut idx = 0;
-        while idx < self.code_src.len() {
+        while idx < self.text.len() {
             let (op, debug) = self.fetch_code_debug(idx);
             println!("{}", debug);
             idx += op.num_args() + 1;
