@@ -1,11 +1,7 @@
 use crate::bytecode::instruction::{OpCode, OpConversionError};
 use crate::bytecode::object::LoxObject;
+use crate::lang::tokenizer::span::Span;
 use std::io;
-
-struct LineInfo {
-    line_num: usize,
-    is_first: bool,
-}
 
 /// Represents errors that can occur during memory operations.
 #[derive(Debug)]
@@ -30,11 +26,12 @@ impl From<io::Error> for MemoryError {
 
 /// Represents the memory structure used in the virtual machine, including code, line encodings,
 /// RAM, and constants.
+#[derive(Debug)]
 pub struct Memory {
     // the src code as u8s (can be cast to opcodes)
     text: Vec<u8>,
     // the line info for the test segement, run-length encoded.
-    lines: Vec<(usize, usize)>,
+    spans: Vec<(Span, usize)>,
     // the operating stack
     stack: Vec<LoxObject>,
     // the program constants
@@ -42,28 +39,27 @@ pub struct Memory {
 }
 
 impl Memory {
-    #[inline]
-    pub fn code_len(&self) -> usize {
-        self.text.len()
-    }
-
-    #[inline]
     pub fn new() -> Self {
         Self {
             text: Vec::new(),
-            lines: Vec::new(),
+            spans: Vec::new(),
             stack: Vec::new(),
             constants: Vec::new(),
         }
     }
 
     #[inline]
-    fn code_is_empty(&self) -> bool {
+    pub fn text_len(&self) -> usize {
+        self.text.len()
+    }
+
+    #[inline]
+    pub fn text_is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
     #[inline]
-    fn code_get(&self, loc: usize) -> u8 {
+    pub fn text_get(&self, loc: usize) -> u8 {
         debug_assert!(
             loc < self.text.len(),
             "index would go out of bounds on code segment"
@@ -72,73 +68,69 @@ impl Memory {
     }
 
     #[inline]
-    fn code_push_u8(&mut self, v: u8, line: usize) {
-        self.text.push(v);
-        if let Some((l, cnt)) = self.lines.last_mut() {
-            if line == *l {
-                *cnt += 1;
-                return;
-            }
-        }
-        self.lines.push((line, 1));
+    pub fn text_get_u16(&self, loc: usize) -> u16 {
+        debug_assert!(
+            loc + 1 < self.text.len(),
+            "index would go out of bounds on code segment"
+        );
+        let b1 = self.text[loc];
+        let b2 = self.text[loc + 1];
+        u16::from_le_bytes([b1, b2])
+    }
+
+    pub fn text_get_debug(&self, code_idx: usize) -> (OpCode, String) {
+        let prefix = self.format_line_prefix(code_idx);
+        self.decode_opcode(code_idx, &prefix)
     }
 
     #[inline]
-    fn code_push_slice(&mut self, v: &[u8], line: usize) {
-        self.text.extend_from_slice(v);
-        if let Some((l, cnt)) = self.lines.last_mut() {
-            if line == *l {
-                *cnt += v.len();
+    pub fn text_push_u8(&mut self, v: u8, span: Span) {
+        self.text.push(v);
+        if let Some(last) = self.spans.last_mut() {
+            if last.0 == span {
+                last.1 += 1;
                 return;
             }
         }
-        self.lines.push((line, v.len()));
-    }
-
-    fn code_get_line(&self, instruction_idx: usize) -> LineInfo {
-        let mut count = 0;
-        for (line, n) in &self.lines {
-            if count <= instruction_idx && instruction_idx < count + n {
-                return if count == instruction_idx {
-                    LineInfo {
-                        line_num: *line,
-                        is_first: true,
-                    }
-                } else {
-                    LineInfo {
-                        line_num: *line,
-                        is_first: false,
-                    }
-                };
-            }
-            count += n;
-        }
-        panic!("Instruction index out of bounds: {}", instruction_idx);
+        self.spans.push((span, 1));
     }
 
     /// Pushes an opcode into the code memory, associating it with a specific line number.
     #[inline]
-    pub fn push_opcode(&mut self, op: OpCode, line: usize) {
-        self.code_push_u8(op as u8, line);
+    pub fn text_push_opcode(&mut self, op: OpCode, span: Span) {
+        self.text_push_u8(op as u8, span);
     }
 
-    /// Pushes a constant value into the constants memory and generates the appropriate opcode
-    /// to reference it in the code memory.
-    pub fn push_constant_f64(&mut self, constant: f64, line: usize) {
-        let constant_index = self.constants.len();
-        self.constants.push(LoxObject::Number(constant));
-        if constant_index < u8::MAX as usize {
-            self.code_push_u8(OpCode::Constant as u8, line);
-            self.code_push_u8(constant_index as u8, line);
-        } else {
-            self.code_push_u8(OpCode::ConstantLong as u8, line);
-            self.code_push_slice(&(constant_index as u16).to_be_bytes(), line);
+    #[inline]
+    pub fn text_push_slice(&mut self, v: &[u8], span: Span) {
+        self.text.extend_from_slice(v);
+        if let Some(last) = self.spans.last_mut() {
+            if last.0 == span {
+                last.1 += v.len();
+                return;
+            }
         }
+        self.spans.push((span, v.len()));
+    }
+
+    fn text_get_span(&self, text_idx: usize) -> (Span, bool) {
+        let mut count = 0;
+        for (span, n) in &self.spans {
+            if count <= text_idx && text_idx < count + n {
+                return if count == text_idx {
+                    (*span, true)
+                } else {
+                    (*span, false)
+                };
+            }
+            count += n;
+        }
+        panic!("Instruction index out of bounds: {}", text_idx);
     }
 
     /// Pushes a value onto the stack
     #[inline]
-    pub fn push_stack(&mut self, val: LoxObject) {
+    pub fn stack_push(&mut self, val: LoxObject) {
         self.stack.push(val)
     }
 
@@ -146,27 +138,28 @@ impl Memory {
     ///
     /// # Returns
     /// Returns `Some(LoxObject)` if the stack is not empty, otherwise `None`.
-    pub fn pop_stack(&mut self) -> LoxObject {
+    #[inline]
+    pub fn stack_pop(&mut self) -> LoxObject {
         debug_assert!(self.stack.len() > 0, "pop from stack invalid with len 0");
         self.stack.pop().unwrap()
     }
 
-    /// Retrieves the instruction at the specified location in the code.
+    /// returns a range of values from the stack.
     ///
-    /// # Panics
-    /// Panics if the location is out of bounds.
-    #[cfg(debug_assertions)]
-    pub fn fetch_opcode(&mut self, loc: usize) -> OpCode {
-        let (op, debug_info) = self.fetch_code_debug(loc);
-        println!("{}", debug_info);
-        println!("stack: {:?}", &self.stack[..]);
-        op
+    /// # Returns
+    /// Returns `Some(LoxObject)` if the stack is not empty, otherwise `None`.
+    #[inline]
+    pub fn stack_slice(&self) -> &[LoxObject] {
+        &self.stack[..]
     }
 
-    #[cfg(not(debug_assertions))]
+    /// returns a range of values from the stack.
+    ///
+    /// # Returns
+    /// Returns `Some(LoxObject)` if the stack is not empty, otherwise `None`.
     #[inline]
-    pub fn fetch_opcode(&self, loc: usize) -> OpCode {
-        OpCode::from(self.code_get(loc))
+    pub fn stack_len(&self) -> usize {
+        self.stack.len()
     }
 
     /// Retrieves the constant value at the specified location.
@@ -174,7 +167,7 @@ impl Memory {
     /// # Panics
     /// Panics if the location is out of bounds.
     #[inline]
-    pub fn fetch_constant(&self, loc: usize) -> LoxObject {
+    pub fn constant_get(&self, loc: usize) -> LoxObject {
         debug_assert!(
             loc < self.constants.len(),
             "index would go out of bounds on constants"
@@ -182,56 +175,30 @@ impl Memory {
         self.constants.get(loc).unwrap().clone()
     }
 
-    /// Efficiently fetches a u8 value from the code memory.
+    /// Retrieves the constant value at the specified location.
     ///
     /// # Panics
     /// Panics if the location is out of bounds.
     #[inline]
-    pub fn fetch_u8(&self, loc: usize) -> u8 {
-        self.code_get(loc)
+    pub fn constant_push(&mut self, v: LoxObject) {
+        self.constants.push(v)
     }
 
-    /// Efficiently fetches a u8 value from the code memory and casts it to usize.
+    /// Retrieves the constant value at the specified location.
     ///
     /// # Panics
     /// Panics if the location is out of bounds.
     #[inline]
-    pub fn fetch_u8_as_usize(&self, loc: usize) -> usize {
-        self.code_get(loc) as usize
-    }
-
-    /// Efficiently fetches a u16 value from the code memory at the specified location.
-    ///
-    /// # Panics
-    /// Panics if the location is out of bounds or if there are not enough bytes to read a u16.
-    #[inline]
-    pub fn fetch_u16(&self, loc: usize) -> u16 {
-        debug_assert!(
-            loc + 1 < self.text.len(),
-            "index would go out of bounds on code segment for u16"
-        );
-        u16::from_be_bytes([self.text[loc], self.text[loc + 1]])
-    }
-
-    /// Efficiently fetches a u16 value from the code memory at the specified location and converts to usize
-    ///
-    /// # Panics
-    /// Panics if the location is out of bounds or if there are not enough bytes to read a u16.
-    #[inline]
-    pub fn fetch_u16_usize(&self, loc: usize) -> usize {
-        debug_assert!(
-            loc + 1 < self.text.len(),
-            "index would go out of bounds on code segment for u16"
-        );
-        u16::from_be_bytes([self.text[loc], self.text[loc + 1]]) as usize
+    pub fn constant_len(&mut self) -> usize {
+        self.constants.len()
     }
 
     /// Formats the line prefix for debugging.
     fn format_line_prefix(&self, code_idx: usize) -> String {
-        let line_info = self.code_get_line(code_idx);
-        let line_num_str = format!("{}", line_info.line_num);
+        let (span, is_first) = self.text_get_span(code_idx);
+        let line_num_str = format!("{}", span);
 
-        if line_info.is_first {
+        if is_first {
             format!("{:08} @{}", code_idx, line_num_str)
         } else {
             let padding = std::iter::repeat(" ")
@@ -243,10 +210,10 @@ impl Memory {
 
     /// Decodes the opcode and formats it for debugging.
     fn decode_opcode(&self, code_idx: usize, prefix: &str) -> (OpCode, String) {
-        let op = OpCode::from(self.code_get(code_idx));
+        let op = OpCode::from(self.text_get(code_idx));
         match op {
             OpCode::Constant => {
-                let cidx = self.code_get(code_idx + 1);
+                let cidx = self.text_get(code_idx + 1);
                 (
                     op,
                     format!(
@@ -258,10 +225,10 @@ impl Memory {
                 )
             }
             OpCode::ConstantLong => {
-                let part1 = self.code_get(code_idx + 1);
-                let part2 = self.code_get(code_idx + 2);
+                let part1 = self.text_get(code_idx + 1);
+                let part2 = self.text_get(code_idx + 2);
                 let slice = [part1, part2];
-                let cidx = u16::from_be_bytes(slice) as usize;
+                let cidx = u16::from_le_bytes(slice) as usize;
                 (
                     op,
                     format!(
@@ -277,24 +244,15 @@ impl Memory {
         }
     }
 
-    /// This function takes in a line number and an opcode and formats
-    /// it specifically as the first occurrence of this line number.
-    /// This is to make it easier to read the dump and see which ops originated
-    /// from the same line.
-    fn fetch_code_debug(&self, code_idx: usize) -> (OpCode, String) {
-        let prefix = self.format_line_prefix(code_idx);
-        self.decode_opcode(code_idx, &prefix)
-    }
-
     /// Dumps the assembly representation of the bytecode stored in memory to the console.
     pub fn dump_assm(&mut self) -> Result<(), MemoryError> {
-        if self.code_is_empty() {
+        if self.text_is_empty() {
             return Ok(());
         }
         println!("=======begin dump=======");
         let mut idx = 0;
         while idx < self.text.len() {
-            let (op, debug) = self.fetch_code_debug(idx);
+            let (op, debug) = self.text_get_debug(idx);
             println!("{}", debug);
             idx += op.num_args() + 1;
         }

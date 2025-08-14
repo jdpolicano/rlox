@@ -1,4 +1,8 @@
-use crate::bytecode::error::{BinOpError, BinOpSide, ErrorObject, LoxError, TypeError};
+use crate::bytecode::error::{BinOpError, BinOpSide, ErrorObject};
+use crate::bytecode::gc::allocator::GcBox;
+use crate::lang::tree::ast::Literal;
+
+use crate::bytecode::gc::allocator;
 use std::{
     fmt,
     ops::{Add, Div, Mul, Neg, Sub},
@@ -7,6 +11,8 @@ use std::{
 #[derive(Debug, Clone)]
 pub enum LoxObject {
     Number(f64),
+    Boolean(bool),
+    Nil,
     Error(Box<ErrorObject>),
 }
 
@@ -20,6 +26,8 @@ impl fmt::Display for LoxObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Number(n) => write!(f, "{}", n),
+            Self::Boolean(b) => write!(f, "{}", b),
+            Self::Nil => write!(f, "nil"),
             Self::Error(e) => write!(f, "{}", e),
         }
     }
@@ -89,6 +97,34 @@ impl Neg for LoxObject {
         match self {
             Self::Number(n) => Self::Number(-n),
             _ => LoxObject::binop_error(BinOpError::NegOpFailure),
+        }
+    }
+}
+
+impl From<Literal> for LoxObject {
+    fn from(value: Literal) -> Self {
+        match value {
+            Literal::Number { value, .. } => Self::Number(value),
+            Literal::Boolean { value, .. } => Self::Boolean(value),
+            Literal::Nil { .. } => Self::Nil,
+            _ => {
+                println!("not implmented for '{}'", value);
+                panic!("cannot move forward");
+            }
+        }
+    }
+}
+
+impl From<&Literal> for LoxObject {
+    fn from(value: &Literal) -> Self {
+        match value {
+            Literal::Number { value, .. } => Self::Number(*value),
+            Literal::Boolean { value, .. } => Self::Boolean(*value),
+            Literal::Nil { .. } => Self::Nil,
+            _ => {
+                println!("not implmented for '{}'", value);
+                panic!("cannot move forward");
+            }
         }
     }
 }

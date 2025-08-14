@@ -1,6 +1,9 @@
+pub mod codegen;
+pub mod compiler;
 pub mod encoding;
 pub mod error;
+pub mod gc;
 pub mod instruction;
 pub mod memory;
-pub mod object;
+pub mod runtime;
 pub mod vm;

@@ -164,7 +164,6 @@ impl<'src> Scanner<'src> {
                         Span::new(self.marker, self.current),
                     ));
                 }
-
                 dot_cnt += 1;
                 continue;
             } else {

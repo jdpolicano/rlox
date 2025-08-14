@@ -1,31 +1,28 @@
-use rloxv2::interpreter::lox::Lox;
+use rloxv2::bytecode::codegen::CodeGen;
+use rloxv2::bytecode::memory::Memory;
+use rloxv2::bytecode::vm::VirtualMachine;
+use rloxv2::bytecode::vm::VmOptions;
 use rloxv2::lang::tree::parser::Parser;
-use rloxv2::lang::tree::resolver::Resolver;
-const INPUT: &str = r#"
-var a = "string";
-print a.nothing;
-"#;
+use std::env;
+use std::fs;
 
+// todo: need a compiler to take some of this complexity away.
 fn main() {
-    let mut parser = Parser::new(&INPUT);
-    parser.parse();
-    if parser.had_errors() {
-        let errors = parser.take_errors();
-        println!("{}", errors[0]);
-        errors[0].print_code_block(&INPUT);
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: {} <file_path>", args[0]);
         return;
     }
-    let mut res = Resolver::new();
-    let mut lox = Lox::new();
-    let stmts = parser.take_statements();
-    for stmt in &stmts {
-        if let Err(e) = stmt.accept(&mut res) {
-            println!("{}", e);
-            break;
-        }
-    }
-    if let Err(e) = lox.interpret(stmts) {
+    let file_path = &args[1];
+    let input = fs::read_to_string(file_path).unwrap_or_else(|err| {
+        eprintln!("Error reading file {}: {}", file_path, err);
+        std::process::exit(1);
+    });
+
+    let mut vm = VirtualMachine::new(VmOptions::new(input));
+    if let Err(e) = vm.interpret() {
         println!("{}", e);
+        return;
     };
 }
 

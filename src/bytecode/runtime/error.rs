@@ -1,4 +1,5 @@
-use crate::lang::tokenizer::span::Span;
+use crate::bytecode::gc::allocator::Heap;
+use crate::{bytecode::gc::trace::Trace, lang::tokenizer::span::Span};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
@@ -97,4 +98,8 @@ impl From<BinOpError> for ErrorObject {
             span: None,
         }
     }
+}
+
+impl Trace for ErrorObject {
+    fn trace<T: Trace>(&self, _: &mut Heap<T>) {}
 }

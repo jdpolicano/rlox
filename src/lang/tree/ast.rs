@@ -45,12 +45,12 @@ impl TryFrom<Token<'_>> for BinaryOperator {
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::Equal(_) => write!(f, "='"),
-            Self::NotEqual(_) => write!(f, "!'"),
+            Self::Equal(_) => write!(f, "="),
+            Self::NotEqual(_) => write!(f, "!"),
             Self::Less(_) => write!(f, "<"),
-            Self::LessEqual(_) => write!(f, "<'"),
+            Self::LessEqual(_) => write!(f, "<"),
             Self::Greater(_) => write!(f, ">"),
-            Self::GreaterEqual(_) => write!(f, ">'"),
+            Self::GreaterEqual(_) => write!(f, ">"),
             Self::Plus(_) => write!(f, "+"),
             Self::Minus(_) => write!(f, "-"),
             Self::Star(_) => write!(f, "*"),
@@ -177,6 +177,15 @@ impl Literal {
 
     pub fn new_nil(span: Span) -> Self {
         Self::Nil { span }
+    }
+
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Boolean { span, .. } => *span,
+            Self::Number { span, .. } => *span,
+            Self::String { span, .. } => *span,
+            Self::Nil { span } => *span,
+        }
     }
 }
 
