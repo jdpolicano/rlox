@@ -1,3 +1,4 @@
-pub mod allocator;
-pub mod object;
+pub mod heap;
+pub mod obj;
+pub mod string;
 pub mod trace;

@@ -1,5 +1,5 @@
-use crate::bytecode::gc::allocator::Heap;
+use crate::bytecode::gc::heap::Heap;
 
 pub trait Trace {
-    fn trace<T: Trace>(&self, heap: &mut Heap<T>);
+    fn trace(&self, cx: &mut Heap);
 }
